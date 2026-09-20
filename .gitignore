@@ -4,3 +4,4 @@
 .DS_Store
 config/application-local.properties
 *.log
+.superpowers/
