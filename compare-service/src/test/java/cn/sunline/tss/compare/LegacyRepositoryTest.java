@@ -17,7 +17,7 @@ class LegacyRepositoryTest {
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(ds);
         repository = new LegacyRepository(ds, 30);
         jdbc = new JdbcTemplate(ds);
-        jdbc.update("insert into TSS_BCOMP_CONF values(1,'file','1'),(2,'table','2')");
+        jdbc.update("insert into TSS_BCOMP_CONF(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE) values(1,'file','1'),(2,'table','2')");
     }
     void task(long index, String time) {
         jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,VERIFY_BUSINESS_DATE,TASK_STATE) values(?,'20260920','1',?,'20260919','1')", index, time);

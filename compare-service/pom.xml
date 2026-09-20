@@ -11,5 +11,53 @@
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
     <dependency><groupId>com.h2database</groupId><artifactId>h2</artifactId><scope>test</scope></dependency>
   </dependencies>
-  <build><plugins><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><configuration><layout>ZIP</layout></configuration></plugin></plugins></build>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>com.github.eirslett</groupId>
+        <artifactId>frontend-maven-plugin</artifactId>
+        <version>1.15.1</version>
+        <configuration>
+          <workingDirectory>../compare-ui</workingDirectory>
+          <installDirectory>target/frontend</installDirectory>
+        </configuration>
+        <executions>
+          <execution>
+            <id>install-node-and-npm</id>
+            <goals><goal>install-node-and-npm</goal></goals>
+            <phase>generate-resources</phase>
+            <configuration><nodeVersion>v22.14.0</nodeVersion><npmVersion>10.9.2</npmVersion></configuration>
+          </execution>
+          <execution>
+            <id>npm-ci</id><goals><goal>npm</goal></goals><phase>generate-resources</phase>
+            <configuration><arguments>ci</arguments></configuration>
+          </execution>
+          <execution>
+            <id>frontend-test</id><goals><goal>npm</goal></goals><phase>generate-resources</phase>
+            <configuration><arguments>test -- --run</arguments></configuration>
+          </execution>
+          <execution>
+            <id>frontend-build</id><goals><goal>npm</goal></goals><phase>generate-resources</phase>
+            <configuration><arguments>run build</arguments></configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-management-console</id>
+            <phase>process-resources</phase>
+            <goals><goal>copy-resources</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+              <resources><resource><directory>${project.parent.basedir}/compare-ui/dist</directory></resource></resources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><configuration><layout>ZIP</layout></configuration></plugin>
+    </plugins>
+  </build>
 </project>

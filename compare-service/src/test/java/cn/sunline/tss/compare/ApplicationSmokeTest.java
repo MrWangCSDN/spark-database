@@ -5,6 +5,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -32,5 +34,12 @@ class ApplicationSmokeTest {
     @Test void bootsStandaloneWithoutFileOrRedisTables() {
         assertThat(http.getForObject("/tss/runStatus",String.class)).isEqualTo("2");
         assertThat(http.postForObject("/api/cache/refresh",null,Map.class)).containsEntry("code",200);
+    }
+
+    @Test void servesTheManagementConsoleWithoutCapturingApiRoutes() {
+        ResponseEntity<String> page=http.getForEntity("/tasks",String.class);
+        assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(page.getBody()).contains("<div id=\"root\">");
+        assertThat(http.getForEntity("/api/missing",String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 }

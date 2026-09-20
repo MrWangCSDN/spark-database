@@ -19,10 +19,10 @@ class TaskWorkerTest {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(ds);
         jdbc = new JdbcTemplate(ds); repository = new LegacyRepository(ds, 30); configs = new ConfigStore(repository);
-        jdbc.update("insert into TSS_BCOMP_CONF values(2,'table','2')");
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG values(1,'jdbc:source','sa','','D','0',null)");
+        jdbc.update("insert into TSS_BCOMP_CONF(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE) values(2,'table','2')");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG(DATABASE_ID,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY) values(1,'jdbc:source','sa','','D','0',null)");
         jdbc.update("insert into TSS_BCOMP_TABLE_SQL values(2,1,1,'T','T')");
-        jdbc.update("insert into TSS_BCOMP_FIELD values(2,'ID')");
+        jdbc.update("insert into TSS_BCOMP_FIELD(BCOMP_INDEX,FIELD_NAME) values(2,'ID')");
         env = new MockEnvironment().withProperty("tssveritask.executor.thread.enable", "false")
             .withProperty("spark.datasource.url", "jdbc:meta").withProperty("spark.datasource.username", "sa")
             .withProperty("spark.datasource.password", "").withProperty("spark.datasource.driver-class-name", "D")

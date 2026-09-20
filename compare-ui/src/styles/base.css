@@ -1,0 +1,27 @@
+* { box-sizing: border-box; }
+html { font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+a { color: inherit; text-decoration: none; }
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 8px; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.035em; }
+h2 { margin-bottom: 6px; font-size: 18px; letter-spacing: -.015em; }
+p { color: var(--muted); line-height: 1.55; }
+label { display: grid; gap: 7px; font-size: 13px; font-weight: 650; }
+input, select, textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); padding: 9px 11px; outline: none; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+textarea { resize: vertical; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; line-height: 1.55; }
+small { display: block; color: var(--muted); font-weight: 450; margin-top: 4px; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; border: 1px solid transparent; border-radius: 6px; padding: 0 15px; font-weight: 700; cursor: pointer; transition: transform .16s ease, background .16s ease, border-color .16s ease; }
+.button:hover:not(:disabled) { transform: translateY(-1px); }
+.button:disabled { opacity: .5; cursor: default; }
+.button.primary { background: var(--accent); color: #fff; }
+.button.primary:hover { background: var(--accent-hover); }
+.button.ghost { background: var(--surface); border-color: var(--line-strong); }
+.button.small { min-height: 31px; padding: 0 10px; font-size: 12px; }
+.text-button, .button-link { appearance: none; border: 0; background: none; padding: 0; color: var(--accent); font-weight: 700; cursor: pointer; }
+.text-button.danger { color: var(--danger); }
+.icon-button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; font-size: 20px; }
+.eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+.mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }

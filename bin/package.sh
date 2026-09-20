@@ -3,6 +3,8 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_dir"
 mvn "$@" verify
+jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar | grep -q '^BOOT-INF/classes/static/index.html$'
+mkdir -p "$project_dir/target"
 staging_dir="$(mktemp -d "$project_dir/target/tss-package.XXXXXX")"
 # 只清理本次创建的临时目录，避免把旧解压目录中的现场配置打入新发布包。
 trap 'rm -rf "$staging_dir"' EXIT

@@ -5,3 +5,10 @@
 config/application-local.properties
 *.log
 .superpowers/
+compare-ui/node_modules/
+compare-ui/dist/
+compare-ui/test-results/
+compare-ui/playwright-report/
+compare-ui/*.tsbuildinfo
+compare-ui/vite.config.js
+compare-ui/vite.config.d.ts

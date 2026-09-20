@@ -4,7 +4,7 @@
 
 - `compare-service`：Spring Boot 服务，轮询原任务表，只领取 `BCOMP_TYPE='2'` 库表任务，提交并等待 Spark。
 - `compare-spark`：独立普通 JAR，保留原 `cn.sunline.tss.tssveri.spark.SparkHandlerTable` 和比对主体。
-- **原工程没有 HTML/Vue/React/JSP 等页面源码，因此本工程没有迁入页面。** 已保留原工程实际存在的两个接口，不从其他工程拼入页面。
+- `compare-ui`：按独立服务 API 新开发的 React 管理台，随 `compare-service` JAR 同包发布。原工程没有页面源码，因此没有从其他工程拼接页面。
 
 ## 不变的兼容边界
 
@@ -27,14 +27,14 @@ Spark 源文件只改了入口的参数数量检查及明文参数日志；其�
 
 ## 构建与测试
 
-要求 JDK 17、Maven 3.9+。与原 POM 一致，使用 Spark 3.5.3 / Scala 2.12 和 Spring Boot 3.3.10。不要沿用旧示例中指向 Spark 3.3.2 的 `spark_home`；集群发行版需要匹配 3.5.3。
+要求 JDK 17、Maven 3.9+。构建会自动安装固定版本 Node 22.14.0/npm 10.9.2，执行前端测试与构建，再复制到 Boot JAR。与原 POM 一致，使用 Spark 3.5.3 / Scala 2.12 和 Spring Boot 3.3.10。不要沿用旧示例中指向 Spark 3.3.2 的 `spark_home`；集群发行版需要匹配 3.5.3。
 
 ```bash
 mvn clean verify
 bin/package.sh
 ```
 
-测试只使用隔离 H2，不连接业务库：服务任务领取/并发、原21参数/AES、刷新/失败回写、HTTP启动，以及本地 Spark 相同/差异/缺行/重复键入库。H2测试表只在 `src/test` 中，不随服务发布。
+测试只使用隔离 H2 和前端模拟 API，不连接业务库：服务任务领取/并发、原21参数/AES、管理 API、刷新/失败回写、HTTP/SPA 启动，以及本地 Spark 相同/差异/缺行/重复键入库。H2测试表只在 `src/test` 中，不随服务发布。
 
 产物：
 
@@ -49,6 +49,25 @@ target/tss-compare-1.0.0-SNAPSHOT.tar.gz
 ```
 
 Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spark 模块的 provided Jackson 使用 2.15.2，与 Spark 3.5.3 的 Scala Jackson 模块匹配，避免继承 Boot Jackson 版本造成运行冲突。
+
+## 管理台
+
+服务根路径打开管理台，提供运行总览、任务创建与分页查询、任务详情和差异分页、核对配置创建/编辑/复制、数据库连接创建/编辑，以及 light/dark/system 主题。列表默认每页20条，最多100条；页面仅管理 `BCOMP_TYPE='2'`。
+
+管理台继续写原 `TSS_BCOMP_*` 表，不新增生产 DDL，也不改变字段编码。配置以基本信息、两侧 SQL、字段规则为一个事务保存；状态1或2任务引用配置或数据库连接时拒绝修改。数据库密码与生成密钥不会出现在 API 响应，编辑时留空密码表示保留原密文。
+
+主要 API：
+
+| 路径 | 用途 |
+|---|---|
+| `GET /api/dashboard` | 服务与当日任务总览 |
+| `GET/POST /api/tasks` | 分页查询、创建状态1任务 |
+| `GET /api/tasks/{index}/{date}/{batch}/{timeNode}` | 精确任务详情 |
+| `GET .../differences` | 差异明细分页和结果过滤 |
+| `GET/POST/PUT /api/configurations...` | 配置聚合查询、创建、修改、复制 |
+| `GET/POST/PUT /api/databases...` | 数据库连接查询、创建、修改 |
+
+页面静态路由只覆盖管理台已知路径；`/api` 与 `/tss` 不进入 SPA 兜底。配置保存成功而进程内缓存刷新失败时，API 返回 `saved=true, cacheRefreshed=false`，页面明确提示刷新警告。
 
 ## 部署
 
@@ -83,7 +102,7 @@ Spark写任务/结果的 `spark.datasource.*` 和服务元数据源**必须指�
 
 状态值以原枚举为准，原控制器注释的0/1/2说明不准确。关闭轮询时，运行状态2仍表示服务已启动，并不表示正在执行任务。
 
-刷新等待当前作业结束，最多 `compare.refresh-timeout-seconds=300` 秒；超时或加载异常保留旧快照，工作线程继续运行。快照覆盖配置名称与数据库连接；SQL按任务读取，字段/枚举/分片仍由Spark按原逻辑读取。服务不包含配置CRUD或新增提交任务接口，仍由原上游写原任务表。
+刷新等待当前作业结束，最多 `compare.refresh-timeout-seconds=300` 秒；超时或加载异常保留旧快照，工作线程继续运行。快照覆盖配置名称与数据库连接；SQL按任务读取，字段/枚举/分片仍由Spark按原逻辑读取。管理台创建任务仍写原任务表并沿用状态1；同一 `(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH)` 已存在时拒绝重复创建。
 
 ## 切换及回滚
 
