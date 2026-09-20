@@ -1,0 +1,48 @@
+# 将本文件复制为 application-local.properties 后部署。也可以直接使用原工程的
+# application-datasource.properties、application-executor.properties、application-spark.properties。
+# 原配置的 primary 名称 frw 与数据库字段都不用改；下方仅用环境变量替代生产凭据。
+spring.datasource.dynamic.primary=frw
+spring.datasource.dynamic.datasource.frw.url=${TSS_METADATA_URL}
+spring.datasource.dynamic.datasource.frw.username=${TSS_METADATA_USER}
+spring.datasource.dynamic.datasource.frw.password=${TSS_METADATA_PASSWORD}
+spring.datasource.dynamic.datasource.frw.driver-class-name=${TSS_METADATA_DRIVER}
+
+# 服务任务库和 Spark 结果库必须是同一逻辑库，且 Spark 各节点都能访问。
+spark.datasource.url=${spring.datasource.dynamic.datasource.frw.url}
+spark.datasource.username=${spring.datasource.dynamic.datasource.frw.username}
+spark.datasource.password=${spring.datasource.dynamic.datasource.frw.password}
+spark.datasource.driver-class-name=${spring.datasource.dynamic.datasource.frw.driver-class-name}
+spark.datasource.batchExecute=1000
+
+spark_home=${SPARK_HOME}
+spark.master.path=${SPARK_MASTER}
+spark_mainClass=cn.sunline.tss.tssveri.spark.SparkHandlerTable
+app_resource=${COMPARE_HOME}/jobs/compare-spark-1.0.0-SNAPSHOT.jar
+# 由 bin/start.sh 自动枚举 drivers/*.jar；也可填写逗号分隔的驱动绝对路径。
+compare.spark-jars=${COMPARE_SPARK_JARS:}
+spark.submit.deployMode=client
+spark.log.flag=false
+# 如运行在 YARN，配置原 hadoop_conf_dir。
+# hadoop_conf_dir=/opt/hadoop/etc/hadoop
+
+# 以下资源值来自原 application-spark.properties，并非容量建议。
+spark.cores.max=144
+spark.executor.cores=4
+spark.executor.memory=10g
+spark.executor.memoryOverhead=2g
+spark.executor.instances=36
+spark.default.parallelism=500
+spark.driver.maxResultSize=6g
+spark.sql.shuffle.partitions=2000
+spark.driver.memory=6g
+spark.network.timeout=300
+
+tssveritask.executor.thread.enable=true
+tssveritask.executor.thread.maxPoolSize=1
+tssveritask.executor.thread.awaitTerminationSeconds=60
+compare.poll-interval-ms=2000
+compare.refresh-timeout-seconds=300
+compare.jdbc-query-timeout-seconds=30
+# 0表示不限制作业运行时间，符合原来一直等待的行为。
+compare.spark-timeout-seconds=0
+server.port=8080

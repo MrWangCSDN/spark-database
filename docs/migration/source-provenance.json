@@ -1,0 +1,11 @@
+{
+  "sourceProject": "/Users/wangshanhe/Downloads/tss-verisvr 2",
+  "sourceFile": "/Users/wangshanhe/Downloads/tss-verisvr 2/src/main/java/cn/sunline/tss/tssveri/spark/SparkHandlerTable.java",
+  "sourceSha256": "83a9af0fa0fa8e2d0b9b29dbb47de167e245ae54ddd28fce32bd24d6bfb79f98",
+  "migratedTo": "compare-spark/src/main/java/cn/sunline/tss/tssveri/spark/SparkHandlerTable.java",
+  "permittedChanges": [
+    "main方法要求完整21参数",
+    "移除完整参数拼接日志，避免打印数据库密码"
+  ],
+  "frontEndFilesFound": 0
+}

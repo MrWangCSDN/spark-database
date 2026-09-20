@@ -1,0 +1,104 @@
+# TSS Spark 数据库比对微服务
+
+从 `/Users/wangshanhe/Downloads/tss-verisvr 2` 拆出的独立工程。运行时不依赖旧 tss-verisvr 服务、文件服务器或 Redis。
+
+- `compare-service`：Spring Boot 服务，轮询原任务表，只领取 `BCOMP_TYPE='2'` 库表任务，提交并等待 Spark。
+- `compare-spark`：独立普通 JAR，保留原 `cn.sunline.tss.tssveri.spark.SparkHandlerTable` 和比对主体。
+- **原工程没有 HTML/Vue/React/JSP 等页面源码，因此本工程没有迁入页面。** 已保留原工程实际存在的两个接口，不从其他工程拼入页面。
+
+## 不变的兼容边界
+
+不提供生产建表、改表、迁移或配置初始化脚本。现有数据库及配置记录直接复用：
+
+| 原表 | 用途 |
+|---|---|
+| TSS_BCOMP_CONF | 核对类型、名称、分片等配置 |
+| TSS_BCOMP_DATABASE_CONFIG | 两侧连接信息及原AES密文/密钥 |
+| TSS_BCOMP_TABLE_SQL | 两侧SQL和数据库ID |
+| TSS_BCOMP_FIELD | 字段位置、类型、业务键、分区列、忽略规则 |
+| TSS_BCOMP_ENUM / TSS_IGNORE_VALUE | 枚举映射与忽略值 |
+| TSS_BCOMP_TASK | 原任务状态与统计 |
+| TSS_BCOMP_DTL | 原差异明细 |
+| TSS_BCOMP_DIFFFIELD | 原作业保留的预编译查询依赖 |
+
+类型代码、从1开始的字段位置、`${HDRQ}`替换、`|+|`内容分隔符、重复键`#MD5`、明细结果代码全部保留。服务发送原来的21个位置参数。可选字段 `BCOMP_SHARD_STRATEGY`、`BCOMP_READ_MODE` 缺失时沿用原回退行为。
+
+Spark 源文件只改了入口的参数数量检查及明文参数日志；其余比对主体保持一致。原文件 SHA-256 见 `docs/migration/source-provenance.json`。
+
+## 构建与测试
+
+要求 JDK 17、Maven 3.9+。与原 POM 一致，使用 Spark 3.5.3 / Scala 2.12 和 Spring Boot 3.3.10。不要沿用旧示例中指向 Spark 3.3.2 的 `spark_home`；集群发行版需要匹配 3.5.3。
+
+```bash
+mvn clean verify
+bin/package.sh
+```
+
+测试只使用隔离 H2，不连接业务库：服务任务领取/并发、原21参数/AES、刷新/失败回写、HTTP启动，以及本地 Spark 相同/差异/缺行/重复键入库。H2测试表只在 `src/test` 中，不随服务发布。
+
+产物：
+
+```text
+target/tss-compare-1.0.0-SNAPSHOT.tar.gz
+  tss-compare/
+    lib/compare-service-1.0.0-SNAPSHOT.jar
+    jobs/compare-spark-1.0.0-SNAPSHOT.jar
+    drivers/                  # Oracle/PostgreSQL/MySQL运行时驱动
+    config/application-local.properties.example
+    bin/start.sh
+```
+
+Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spark 模块的 provided Jackson 使用 2.15.2，与 Spark 3.5.3 的 Scala Jackson 模块匹配，避免继承 Boot Jackson 版本造成运行冲突。
+
+## 部署
+
+1. 解压发布包到独立目录，例如 `/opt/tss-compare`。
+2. 将 `config/application-local.properties.example` 复制为 `config/application-local.properties`，设置元数据库连接和 Spark 地址。也可把旧 `application-datasource.properties`、`application-executor.properties`、`application-spark.properties` 放在 `config/` 中；原数据库 `primary=frw` 及 `spring.datasource.dynamic.datasource.frw.*` 无需改名。不要复制旧 `application.properties` 的文件/Redis/MyBatis profiles。
+3. 修改**部署属性** `app_resource`，指向新 `jobs/compare-spark-1.0.0-SNAPSHOT.jar`；设置 `spark_home` 指向本机 Spark 3.5.3。`spark_mainClass` 支持原“文件类,库表类”配置或单个库表类。没有修改数据库中任何表配置。
+4. `drivers/` 放置原数据库配置对应的厂商驱动。**GaussDB A 模式需加入现场使用的 GaussDB JDBC JAR**，保留原 `DATABASE_URL`/`DATABASE_DRIVER`。PostgreSQL驱动不能被当成所有GaussDB URL的替代品。部署包不擅自捆绑另一版本的厂商私有驱动。
+5. 服务使用 Boot PropertiesLauncher 的 `loader.path` 加载 `drivers/`；启动脚本通过 `COMPARE_SPARK_JARS` 将同目录驱动传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动路径。Driver和Executor节点必须能访问原库、目标库、元数据库。
+6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值：
+
+```bash
+export JAVA_HOME=/path/to/jdk17
+export SPARK_HOME=/path/to/spark-3.5.3-bin-hadoop3
+export SPARK_MASTER=spark://your-spark-master:7077
+export TSS_METADATA_URL='jdbc:your-metadata-url'
+export TSS_METADATA_USER='your-user'
+export TSS_METADATA_PASSWORD='your-password'
+export TSS_METADATA_DRIVER='your.driver.Class'
+./bin/start.sh
+```
+
+新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
+
+Spark写任务/结果的 `spark.datasource.*` 和服务元数据源**必须指向同一逻辑库**。原Spark资源参数值保留在示例中，仅作为原配置记录，不代表适合当前服务器或保证2000万行安全。`maxPoolSize=1`表示一次一个Spark作业；并发数是每个服务实例的并发，实例数增加会叠加。
+
+## 原接口
+
+| 请求 | 响应 |
+|---|---|
+| `GET /tss/runStatus` | 字符串 `0/1/2/3/4` = 停止/启动中/运行中/停止中/失败 |
+| `POST /api/cache/refresh` | HTTP200，JSON `{"code":200,"msg":"刷新成功"}`；失败业务码500 |
+
+状态值以原枚举为准，原控制器注释的0/1/2说明不准确。关闭轮询时，运行状态2仍表示服务已启动，并不表示正在执行任务。
+
+刷新等待当前作业结束，最多 `compare.refresh-timeout-seconds=300` 秒；超时或加载异常保留旧快照，工作线程继续运行。快照覆盖配置名称与数据库连接；SQL按任务读取，字段/枚举/分片仍由Spark按原逻辑读取。服务不包含配置CRUD或新增提交任务接口，仍由原上游写原任务表。
+
+## 切换及回滚
+
+1. 停止原服务的库表调度，并等待其在途 Spark 作业结束。**不能让未改造的原调度器与新服务同时领取同一批任务**；新服务的条件更新无法约束旧服务的非原子领取。若旧服务还必须跑文件任务，需要在旧服务单独实现类型过滤后再并行运行，本次没有改动源工程。
+2. 检查并处理遗留状态2任务；新服务不会自动重置、清理明细或重跑它们。人工重跑前先确认Spark应用已停止，以及原明细是否需要按现有流程清理。
+3. 核对 `(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH)` 对应唯一任务行。原Spark最终更新缺少时点条件，新服务跳过三元身份重复的任务，避免跨时点误写；不自动修改任何行或增加约束。
+4. 初次启动可设 `tssveritask.executor.thread.enable=false`，检查两个接口及缓存读取，确认后改为true并重启。先用已知小表验证真实GaussDB、业务SQL及结果查询页面，再逐步扩大数据量。
+5. 回滚时停止新服务并等待/核实在途Spark终止，再启动旧服务；表配置从未迁移，不需要回滚DDL。
+
+`SIGTERM`先停止领取、等待 `awaitTerminationSeconds`，超过宽限后中断等待并请求终止Spark进程。默认采用client部署；cluster模式下SparkLauncher的kill不等于资源管理器保证应用已停止，回滚/重试前必须确认集群应用终态。容器强杀或机器故障不会自动恢复状态2任务。
+
+## 保留的旧问题与验证范围
+
+本次是兼容拆分，**没有将“20分钟OOM”或“GaussDB timestamp显示一致”判定为已修复**。Spark仍存在同业务键整组列表、每分区规则加载、驱动游标行为、批量写异常处理等风险；大量差异仍直接写关系库。没有把2000万行业务数据加载进新服务，但Spark本身仍需容量验证。SQL AQE并不消除RDD cogroup的热点键。
+
+日期解析、数值归一化、忽略值匹配、重复键的MD5比较、任务统计更新和失败处理保持原实现，因此既有行为和缺陷一起保留。源作业部分入库异常会吞掉、Spark重试可能重复插入明细；新服务的终态检查不能证明每一条明细都落库。后续应独立修复并做结果回归。
+
+没有真实GaussDB/Spark集群、现场配置和OOM日志，本地测试不能代替现场驱动兼容验证、全量性能压测。21参数为了兼容包含连接密码，虽然去除了主动打印，仍需限制操作系统进程信息和Spark作业详情的访问。
