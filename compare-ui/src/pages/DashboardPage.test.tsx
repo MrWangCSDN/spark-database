@@ -14,6 +14,35 @@ const dashboard = {
   updatedAt: '20260920120000'
 }
 
+const baseTask = { bcompIndex: 8, configurationName: '客户余额核对', taskBusinessDate: '20260920', taskBatch: '1', timeNode: 'D', createdAt: '20260920120000', startedAt: null, endedAt: null, failureReason: null, file1Count: 20, file2Count: 20, file1SuccessCount: 20, file2SuccessCount: 20, file1FailureCount: 0, file2FailureCount: 0, readMode: '1' }
+const failedTask = { ...baseTask, bcompIndex: 9, configurationName: '失败任务', taskState: '4', taskResult: '1' }
+const differentTask = { ...baseTask, bcompIndex: 10, configurationName: '差异任务', taskState: '3', taskResult: '1' }
+const consistentTask = { ...baseTask, bcompIndex: 11, configurationName: '一致任务', taskState: '3', taskResult: '2' }
+
+test('shows health metrics and only attention-worthy recent tasks', async () => {
+  server.use(http.get('/api/dashboard', () => HttpResponse.json({
+    ...dashboard,
+    runningCount: 2,
+    todayCompletedCount: 12,
+    todayDifferenceCount: 1,
+    recentTasks: [failedTask, differentTask, consistentTask]
+  })))
+  renderPage(<DashboardPage />)
+
+  expect(await screen.findByRole('heading', { name: '运行总览' })).toBeVisible()
+  await screen.findAllByText(failedTask.configurationName)
+  expect(screen.getByLabelText('核心运行指标')).toHaveTextContent('12')
+  expect(screen.getByRole('region', { name: '需要关注' })).toHaveTextContent(failedTask.configurationName)
+  expect(screen.getByRole('region', { name: '需要关注' })).not.toHaveTextContent(consistentTask.configurationName)
+})
+
+test('shows a stable error state when dashboard loading fails', async () => {
+  server.use(http.get('/api/dashboard', () => HttpResponse.json({}, { status: 500 })))
+  renderPage(<DashboardPage />)
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('总览加载失败')
+})
+
 test('refreshes the configuration cache once and disables the action while loading', async () => {
   let calls = 0
   let complete!: () => void
