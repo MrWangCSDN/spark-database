@@ -43,6 +43,9 @@ tssveritask.executor.thread.awaitTerminationSeconds=60
 compare.poll-interval-ms=2000
 compare.refresh-timeout-seconds=300
 compare.jdbc-query-timeout-seconds=30
+# 管理台“测试连接”的单次超时与服务实例并发上限；测试不执行用户 SQL。
+compare.database-test-timeout-seconds=10
+compare.database-test-max-concurrency=4
 # 0表示不限制作业运行时间，符合原来一直等待的行为。
 compare.spark-timeout-seconds=0
 server.port=8080

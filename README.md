@@ -66,6 +66,8 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 | `GET .../differences` | 差异明细分页和结果过滤 |
 | `GET/POST/PUT /api/configurations...` | 配置聚合查询、创建、修改、复制 |
 | `GET/POST/PUT /api/databases...` | 数据库连接查询、创建、修改 |
+| `POST /api/databases/test` | 测试未保存连接，不落库 |
+| `POST /api/databases/{id}/test` | 复用已保存密码或使用本次临时密码测试 |
 
 页面静态路由只覆盖管理台已知路径；`/api` 与 `/tss` 不进入 SPA 兜底。配置保存成功而进程内缓存刷新失败时，API 返回 `saved=true, cacheRefreshed=false`，页面明确提示刷新警告。
 
@@ -74,8 +76,12 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 1. 解压发布包到独立目录，例如 `/opt/tss-compare`。
 2. 将 `config/application-local.properties.example` 复制为 `config/application-local.properties`，设置元数据库连接和 Spark 地址。也可把旧 `application-datasource.properties`、`application-executor.properties`、`application-spark.properties` 放在 `config/` 中；原数据库 `primary=frw` 及 `spring.datasource.dynamic.datasource.frw.*` 无需改名。不要复制旧 `application.properties` 的文件/Redis/MyBatis profiles。
 3. 修改**部署属性** `app_resource`，指向新 `jobs/compare-spark-1.0.0-SNAPSHOT.jar`；设置 `spark_home` 指向本机 Spark 3.5.3。`spark_mainClass` 支持原“文件类,库表类”配置或单个库表类。没有修改数据库中任何表配置。
-4. `drivers/` 放置原数据库配置对应的厂商驱动。**GaussDB A 模式需加入现场使用的 GaussDB JDBC JAR**，保留原 `DATABASE_URL`/`DATABASE_DRIVER`。PostgreSQL驱动不能被当成所有GaussDB URL的替代品。部署包不擅自捆绑另一版本的厂商私有驱动。
-5. 服务使用 Boot PropertiesLauncher 的 `loader.path` 加载 `drivers/`；启动脚本通过 `COMPARE_SPARK_JARS` 将同目录驱动传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动路径。Driver和Executor节点必须能访问原库、目标库、元数据库。
+4. 按数据库实际协议选择驱动：
+   - PostgreSQL 兼容的 GaussDB A：`jdbc:postgresql://host:port/database` 与 `org.postgresql.Driver`，发布包已包含 PostgreSQL 驱动。
+   - 华为原生协议：`jdbc:gaussdb://host:port/database` 与现场厂商文档指定的驱动类；将有合法授权的原生驱动 JAR 放入 `drivers/`。
+   - openGauss：按现场版本确认 JDBC URL，驱动类通常为 `org.opengauss.Driver`；将现场确认的驱动 JAR 放入 `drivers/`。
+   PostgreSQL 驱动不能处理 `jdbc:gaussdb` 等其他协议。工程不下载或捆绑厂商闭源驱动。
+5. `bin/start.sh` 使用 Boot PropertiesLauncher 的 `loader.path` 把 `drivers/` 加入服务类路径，并通过 `COMPARE_SPARK_JARS` 将同目录 JAR 传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动绝对路径。原生驱动必须在每个 Spark 节点可读，Driver和Executor节点必须能访问原库、目标库、元数据库。
 6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值：
 
 ```bash
@@ -92,6 +98,21 @@ export TSS_METADATA_DRIVER='your.driver.Class'
 新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
 
 Spark写任务/结果的 `spark.datasource.*` 和服务元数据源**必须指向同一逻辑库**。原Spark资源参数值保留在示例中，仅作为原配置记录，不代表适合当前服务器或保证2000万行安全。`maxPoolSize=1`表示一次一个Spark作业；并发数是每个服务实例的并发，实例数增加会叠加。
+
+管理台连接测试默认超时10秒、每个服务实例最多4个并发，可通过 `compare.database-test-timeout-seconds` 和 `compare.database-test-max-concurrency` 调整。测试只建立一条 JDBC 连接、调用标准有效性检查并读取产品/版本，不执行配置 SQL。驱动缺失、超时和连接失败只返回稳定错误分类，不回显 URL、用户、密码或驱动异常原文。
+
+有现场测试库时，可显式执行真实 GaussDB 探测；以下变量只在当前命令进程中读取，不写入仓库或测试报告：
+
+```bash
+GAUSSDB_TEST_URL='jdbc:postgresql://host:port/database' \
+GAUSSDB_TEST_USER='compare_user' \
+GAUSSDB_TEST_PASSWORD='request-only-password' \
+GAUSSDB_TEST_DRIVER='org.postgresql.Driver' \
+JAVA_HOME=/path/to/jdk17 \
+mvn -pl compare-service -Dtest=GaussDbConnectionIntegrationTest test
+```
+
+未提供 URL、用户或密码时该测试自动跳过。现场验收仍需在与生产相同的网络、TLS、驱动版本和 Spark 节点条件下完成一次连接测试与最小核对任务。
 
 ## 原接口
 

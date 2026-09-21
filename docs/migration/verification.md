@@ -10,9 +10,11 @@
 - 原Spark源码SHA-256校验；从SparkRun开始直至文件结束的业务代码与来源逐字一致。Git归档统一换行符，逻辑不变。
 - Boot 冒烟测试确认 `/tasks` 返回同包 SPA，未知 `/api/*` 保持404；前端 Maven 构建固定 Node/npm 版本。
 - 服务包不含Spark Core/SQL及作业类，作业包不含Boot嵌套布局；测试建表脚本不在发布包中；服务 JAR 包含 `BOOT-INF/classes/static/index.html`。
+- 数据库连接测试单元/API测试覆盖有界并发、超时、驱动缺失、异常脱敏、草稿不落库、已保存密码解密和临时密码不写回；前端覆盖草稿/已保存连接分流、结果失效、操作禁用和保存后缓存刷新警告。
+- 未设置 `GAUSSDB_TEST_URL/USER/PASSWORD` 时执行 `GaussDbConnectionIntegrationTest`：1项跳过、0次连接，构建成功。
 
 ## 尚未验证
 
-真实GaussDB A模式驱动、目标Spark资源管理器、现场SQL/字段配置、2000万行容量、差异写入负载，以及OOM/时间字段异常修复。管理台是按现有表和新 API 重新开发，源工程没有页面源码可做像素或交互迁移对照。
+真实 GaussDB 尚未验证：当前没有现场 URL、账号、密码、TLS材料或厂商原生驱动。目标Spark资源管理器、现场SQL/字段配置、2000万行容量、差异写入负载，以及OOM/时间字段异常修复也尚未验证。管理台是按现有表和新 API 重新开发，源工程没有页面源码可做像素或交互迁移对照。
 
 构建命令：`mvn clean verify`；前端浏览器流程：`cd compare-ui && npm run e2e`；发布命令：`bin/package.sh`。本机Maven镜像较慢，执行时用临时settings指向Maven Central，未修改全局Maven配置。
