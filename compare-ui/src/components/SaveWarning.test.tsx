@@ -23,3 +23,18 @@ test('uses database-specific saved and refreshed copy when supplied', async () =
   await user.click(screen.getByRole('button', { name: '重试刷新缓存' }))
   expect(await screen.findByText('新连接已加载到当前服务实例。')).toBeVisible()
 })
+
+test('shows a new cache failure after an earlier retry succeeded', async () => {
+  server.use(http.post('/api/cache/refresh', () => HttpResponse.json({ code: 200, msg: '刷新成功' })))
+  const user = userEvent.setup()
+  const view = render(<SaveWarning message="连接已保存，但缓存刷新失败" savedTitle="连接已保存" successMessage="新连接已加载到当前服务实例。" />)
+
+  await user.click(screen.getByRole('button', { name: '重试刷新缓存' }))
+  expect(await screen.findByText('新连接已加载到当前服务实例。')).toBeVisible()
+
+  view.rerender(<SaveWarning message={null} savedTitle="连接已保存" successMessage="新连接已加载到当前服务实例。" />)
+  view.rerender(<SaveWarning message="连接已保存，但缓存刷新失败" savedTitle="连接已保存" successMessage="新连接已加载到当前服务实例。" />)
+
+  expect(screen.getByText('连接已保存，但缓存刷新失败')).toBeVisible()
+  expect(screen.getByRole('button', { name: '重试刷新缓存' })).toBeVisible()
+})

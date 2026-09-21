@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 
 type SaveWarningProps = {
@@ -9,6 +9,9 @@ type SaveWarningProps = {
 
 export function SaveWarning({ message, savedTitle = '配置已保存', successMessage = '新配置已加载到当前服务实例。' }: SaveWarningProps) {
   const [state, setState] = useState<'idle' | 'loading' | 'success' | 'failed'>('idle')
+  useEffect(() => {
+    if (!message) setState('idle')
+  }, [message])
   if (!message) return null
   const refresh = async () => {
     setState('loading')
