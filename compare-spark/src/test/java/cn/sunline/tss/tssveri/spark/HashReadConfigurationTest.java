@@ -17,28 +17,28 @@ class HashReadConfigurationTest {
     @Test void invalidHashCountsNeverFallBackToAdaptiveLegacyDefaults() throws Exception {
         String url="jdbc:h2:mem:conf_"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try (Connection c=DriverManager.getConnection(url,"sa",""); Statement s=c.createStatement()) {
-            s.execute("create table TSS_BCOMP_CONF(BCOMP_INDEX int, BCOMP_PARTITION_NUM decimal(30,2), BCOMP_SHARD_STRATEGY varchar(10))");
-            s.execute("insert into TSS_BCOMP_CONF values(1,1,'HASH')");
+            s.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM decimal(30,2), BCOMP_SHARD_STRATEGY varchar(10))");
+            s.execute("insert into TSS_BCOMP_CONF_NEW values(1,1,'HASH')");
             String[] args = args(url);
             for (String invalid : List.of("null","0","-1","257","1.5","999999999999")) {
-                s.execute("update TSS_BCOMP_CONF set BCOMP_PARTITION_NUM="+invalid);
+                s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_PARTITION_NUM="+invalid);
                 assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args,8), invalid);
             }
-            s.execute("update TSS_BCOMP_CONF set BCOMP_PARTITION_NUM=1");
+            s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_PARTITION_NUM=1");
             assertEquals(1,SparkHandlerTable.readShardConf(args,8).partitionNum);
-            s.execute("alter table TSS_BCOMP_CONF drop column BCOMP_PARTITION_NUM");
+            s.execute("alter table TSS_BCOMP_CONF_NEW drop column BCOMP_PARTITION_NUM");
             assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args,8));
         }
     }
     @Test void legacyDefaultsAndExplicitNtileArePreserved() throws Exception {
         String url="jdbc:h2:mem:legacy_"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try (Connection c=DriverManager.getConnection(url,"sa",""); Statement s=c.createStatement()) {
-            s.execute("create table TSS_BCOMP_CONF(BCOMP_INDEX int, BCOMP_PARTITION_NUM int)");
-            s.execute("insert into TSS_BCOMP_CONF values(1,null)");
+            s.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM int)");
+            s.execute("insert into TSS_BCOMP_CONF_NEW values(1,null)");
             var legacy=SparkHandlerTable.readShardConf(args(url),8);
             assertEquals("RANGE",legacy.strategy); assertEquals(8,legacy.partitionNum);
-            s.execute("alter table TSS_BCOMP_CONF add BCOMP_SHARD_STRATEGY varchar(10) default 'NTILE'");
-            s.execute("update TSS_BCOMP_CONF set BCOMP_PARTITION_NUM=12");
+            s.execute("alter table TSS_BCOMP_CONF_NEW add BCOMP_SHARD_STRATEGY varchar(10) default 'NTILE'");
+            s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_PARTITION_NUM=12");
             var ntile=SparkHandlerTable.readShardConf(args(url),8);
             assertEquals("NTILE",ntile.strategy); assertEquals(12,ntile.partitionNum);
         }
@@ -46,16 +46,16 @@ class HashReadConfigurationTest {
     @Test void unknownStrategiesCannotSelectLegacyReads() throws Exception {
         String url="jdbc:h2:mem:strategy_"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try (Connection c=DriverManager.getConnection(url,"sa",""); Statement statement=c.createStatement()) {
-            statement.execute("create table TSS_BCOMP_CONF(BCOMP_INDEX int, BCOMP_PARTITION_NUM int, BCOMP_SHARD_STRATEGY varchar(10))");
-            statement.execute("insert into TSS_BCOMP_CONF values(1,4,'HSAH')");
+            statement.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM int, BCOMP_SHARD_STRATEGY varchar(10))");
+            statement.execute("insert into TSS_BCOMP_CONF_NEW values(1,4,'HSAH')");
             assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args(url),8));
         }
     }
     @Test void strategyPermissionFailureCannotMasqueradeAsMissingLegacyColumn() throws Exception {
         String url="jdbc:h2:mem:permission_"+UUID.randomUUID();
         try (Connection c=DriverManager.getConnection(url,"sa",""); Statement statement=c.createStatement()) {
-            statement.execute("create table TSS_BCOMP_CONF(BCOMP_INDEX int, BCOMP_PARTITION_NUM int, BCOMP_SHARD_STRATEGY varchar(10))");
-            statement.execute("insert into TSS_BCOMP_CONF values(1,4,'HASH')");
+            statement.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM int, BCOMP_SHARD_STRATEGY varchar(10))");
+            statement.execute("insert into TSS_BCOMP_CONF_NEW values(1,4,'HASH')");
             statement.execute("create user RESTRICTED password 'test'");
             String[] restricted=args(url); restricted[2]="RESTRICTED"; restricted[3]="test";
             assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(restricted,8));

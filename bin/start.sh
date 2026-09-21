@@ -3,6 +3,17 @@ set -euo pipefail
 COMPARE_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export COMPARE_HOME
 cd "$COMPARE_HOME"
+
+# 可选的服务器环境变量文件。set -a 允许文件内直接使用 KEY=VALUE，
+# 无需为每一项重复添加 export；文件不存在时保持原有启动方式。
+env_file="$COMPARE_HOME/config/bd.env"
+if [[ -f "$env_file" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+fi
+
 if [[ ! -f lib/compare-service-1.0.0-SNAPSHOT.jar ]]; then
   echo '请先运行 bin/package.sh，解压 target/tss-compare-1.0.0-SNAPSHOT.tar.gz 后使用包内 bin/start.sh 启动。' >&2
   exit 1

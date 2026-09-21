@@ -28,7 +28,7 @@ class ConfigurationApiTest {
         var source=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1","sa","");
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(source);
         jdbc=new JdbcTemplate(source); repository=new ConfigurationRepository(source,30);
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) values(1,'old','jdbc:o','u','p','D','0'),(2,'new','jdbc:n','u','p','D','0')");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) values(1,'old','jdbc:o','u','p','D','0'),(2,'new','jdbc:n','u','p','D','0')");
     }
 
     MockMvc mvc(CacheReloader reloader){
@@ -50,22 +50,22 @@ class ConfigurationApiTest {
     String axonScript(String name) { return """
         START TRANSACTION;
 
-        TRUNCATE TABLE tss_bcomp_field;
-        TRUNCATE TABLE tss_bcomp_table_sql;
-        TRUNCATE TABLE tss_bcomp_conf;
+        TRUNCATE TABLE tss_bcomp_field_new;
+        TRUNCATE TABLE tss_bcomp_table_sql_new;
+        TRUNCATE TABLE tss_bcomp_conf_new;
 
-        INSERT INTO tss_bcomp_conf
+        INSERT INTO tss_bcomp_conf_new
           (bcomp_index,bcomp_module,bcomp_name,bcomp_memo,bcomp_type,bcomp_range,bcomp_time_node,bcomp_state)
         VALUES
           (1,'dept','%s','配置''说明','2','1','3','1');
 
-        INSERT INTO tss_bcomp_field
+        INSERT INTO tss_bcomp_field_new
           (bcomp_index,field_name,field_type,field_memo,field_old_index,field_new_index,field_index_flag,field_enum_flag)
         VALUES
           (1,'ID','1','主键', '1','1','1','0'),
           (1,'UPDATED_AT','1','时间', '2','2','0','0');
 
-        INSERT INTO tss_bcomp_table_sql
+        INSERT INTO tss_bcomp_table_sql_new
           (bcomp_index,orig_sql,orig_database_id,dest_sql,dest_database_id)
         VALUES
           (1,'(select ID,UPDATED_AT from T where NOTE=''a;b'') orig',1,'(select ID,UPDATED_AT from T where NOTE=''a;b'') dest',2);
@@ -86,13 +86,22 @@ class ConfigurationApiTest {
             .replace("'配置''说明','2','1','3','1');", "'配置''说明','2','1','3','1',"+count+","+strategy+");");
     }
 
+    @Test void rejectsOldTableScriptWithoutTouchingOldTables() throws Exception {
+        jdbc.execute("CREATE TABLE TSS_BCOMP_CONF (BCOMP_INDEX BIGINT)");
+        jdbc.update("INSERT INTO TSS_BCOMP_CONF VALUES (99)");
+        mvc(() -> {}).perform(multipart("/api/configurations/import")
+            .file(scriptFile(axonScript("OLD").replace("_new", ""))))
+            .andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForObject("SELECT BCOMP_INDEX FROM TSS_BCOMP_CONF", Long.class)).isEqualTo(99L);
+    }
+
     @Test void importsHashPartitionCountWithoutPartitionField() throws Exception {
         for (int count : new int[]{1,16,256}) {
             mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(hashScript(""+count,"'HASH'"))))
                 .andExpect(status().isOk());
-            assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF where BCOMP_INDEX=1",Integer.class)).isEqualTo(count);
-            assertThat(jdbc.queryForObject("select BCOMP_SHARD_STRATEGY from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("HASH");
-            assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD where FIELD_PARTITION_FLAG='1'",Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",Integer.class)).isEqualTo(count);
+            assertThat(jdbc.queryForObject("select BCOMP_SHARD_STRATEGY from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",String.class)).isEqualTo("HASH");
+            assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD_NEW where FIELD_PARTITION_FLAG='1'",Integer.class)).isZero();
         }
     }
 
@@ -104,8 +113,8 @@ class ConfigurationApiTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.configurationCount").value(1))
             .andExpect(jsonPath("$.fieldCount").value(3));
-        assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF where BCOMP_INDEX=1", Integer.class)).isEqualTo(16);
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD where BCOMP_INDEX=1 and FIELD_INDEX_FLAG='1'", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1", Integer.class)).isEqualTo(16);
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD_NEW where BCOMP_INDEX=1 and FIELD_INDEX_FLAG='1'", Integer.class)).isEqualTo(2);
     }
 
     @Test void invalidHashParametersRollBackReplacementAndDoNotRefresh() throws Exception {
@@ -119,31 +128,31 @@ class ConfigurationApiTest {
         mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import").file(scriptFile(hashScript("16","'RANGE'"))))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
         assertThat(reloads).hasValue(0);
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(1);
     }
 
     @Test void hashScriptWithNoBusinessKeyIsRejectedAndRolledBack() throws Exception {
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(
             hashScript("16","'HASH'").replace("'主键', '1','1','1','0'", "'主键', '1','1','0','0'"))))
             .andExpect(status().isBadRequest());
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW",Integer.class)).isZero();
     }
 
     @Test void legacyScriptStillImportsWhenOptionalStrategyColumnDoesNotExist() throws Exception {
-        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF DROP COLUMN BCOMP_SHARD_STRATEGY");
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW DROP COLUMN BCOMP_SHARD_STRATEGY");
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(axonScript("LEGACY"))))
             .andExpect(status().isOk());
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("LEGACY");
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",String.class)).isEqualTo("LEGACY");
     }
 
     @Test void newScriptOnAnUnmigratedDatabaseDoesNotEraseExistingConfiguration() throws Exception {
-        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF DROP COLUMN BCOMP_SHARD_STRATEGY");
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW DROP COLUMN BCOMP_SHARD_STRATEGY");
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(axonScript("LEGACY"))))
             .andExpect(status().isOk());
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(hashScript("16","'HASH'"))))
             .andExpect(status().isUnprocessableEntity());
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("LEGACY");
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",String.class)).isEqualTo("LEGACY");
     }
 
     @Test void importsAxonScriptAsOneTransactionAndRefreshesCache() throws Exception {
@@ -160,22 +169,22 @@ class ConfigurationApiTest {
             .andExpect(jsonPath("$.tableSqlCount").value(1));
 
         assertThat(reloads).hasValue(1);
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF where BCOMP_INDEX=22",Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("ACCOUNT_LOG");
-        assertThat(jdbc.queryForObject("select ORIG_SQL from TSS_BCOMP_TABLE_SQL where BCOMP_INDEX=1",String.class)).contains("a;b");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",String.class)).isEqualTo("ACCOUNT_LOG");
+        assertThat(jdbc.queryForObject("select ORIG_SQL from TSS_BCOMP_TABLE_SQL_NEW where BCOMP_INDEX=1",String.class)).contains("a;b");
     }
 
     @Test void rejectsForbiddenSqlAndRollsBackWholeImport() throws Exception {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
             .andExpect(status().isCreated());
-        String invalid=axonScript("被拒绝").replace("COMMIT;", "DELETE FROM TSS_BCOMP_TASK;\nCOMMIT;");
+        String invalid=axonScript("被拒绝").replace("COMMIT;", "DELETE FROM TSS_BCOMP_TASK_NEW;\nCOMMIT;");
 
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(invalid)))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
 
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF where BCOMP_INDEX=1",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",Integer.class)).isZero();
     }
 
     @Test void rejectsValueExpressionsAndMismatchedTableCounts() throws Exception {
@@ -188,16 +197,16 @@ class ConfigurationApiTest {
             "(1,'dept','MISMATCH','配置''说明','2','1','3','1'),\n  (2,'dept','SECOND','第二个','2','1','3','1');");
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(mismatch)))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW",Integer.class)).isZero();
     }
 
     @Test void activeTaskBlocksWholeScriptImport() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260921','1','3','1')");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260921','1','3','1')");
 
         mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(axonScript("BLOCKED"))))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("CONFIG_IMPORT_TASKS_ACTIVE"));
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW",Integer.class)).isZero();
     }
 
     @Test void importReportsCommittedDataWhenCacheRefreshFails() throws Exception {
@@ -207,7 +216,7 @@ class ConfigurationApiTest {
             .andExpect(jsonPath("$.saved").value(true))
             .andExpect(jsonPath("$.cacheRefreshed").value(false))
             .andExpect(jsonPath("$.warning").value("配置已导入，但缓存刷新失败"));
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("SAVED");
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",String.class)).isEqualTo("SAVED");
     }
 
     @Test void importRequiresANonEmptyFileAndHonorsSizeLimit() throws Exception {
@@ -221,8 +230,8 @@ class ConfigurationApiTest {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"客户余额")))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.saved").value(true))
             .andExpect(jsonPath("$.cacheRefreshed").value(true));
-        assertThat(jdbc.queryForObject("select BCOMP_TYPE from TSS_BCOMP_CONF where BCOMP_INDEX=22",String.class)).isEqualTo("2");
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD where BCOMP_INDEX=22",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select BCOMP_TYPE from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",String.class)).isEqualTo("2");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD_NEW where BCOMP_INDEX=22",Integer.class)).isEqualTo(1);
     }
 
     @Test void invalidSecondFieldDoesNotMutateExistingAggregate() throws Exception {
@@ -230,13 +239,13 @@ class ConfigurationApiTest {
         String invalid=valid(22,"after").replace("]}",",{\"name\":\"DUP\",\"type\":\"1\",\"oldIndex\":1,\"newIndex\":2,\"indexFlag\":\"0\",\"enumFlag\":\"0\",\"partitionFlag\":\"0\",\"ignoreFlag\":\"0\"}]}");
         mvc(() -> {}).perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(invalid))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DUPLICATE_FIELD_POSITION"));
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=22",String.class)).isEqualTo("before");
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD where BCOMP_INDEX=22",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",String.class)).isEqualTo("before");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD_NEW where BCOMP_INDEX=22",Integer.class)).isEqualTo(1);
     }
 
     @Test void runningTaskBlocksConfigurationUpdate() throws Exception {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"before"))).andExpect(status().isCreated());
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','1','EOD','2')");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','1','EOD','2')");
         mvc(() -> {}).perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(valid(22,"after")))
             .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CONFIGURATION_IN_USE"));
     }
@@ -246,7 +255,7 @@ class ConfigurationApiTest {
             .andExpect(status().isCreated()).andExpect(jsonPath("$.saved").value(true))
             .andExpect(jsonPath("$.cacheRefreshed").value(false))
             .andExpect(jsonPath("$.warning").value("配置已保存，但缓存刷新失败"));
-        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=22",String.class)).isEqualTo("saved");
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",String.class)).isEqualTo("saved");
     }
 
     @Test void copiesConfigurationWithoutTasksAndReturnsOptions() throws Exception {
@@ -254,7 +263,7 @@ class ConfigurationApiTest {
         mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"source"))).andExpect(status().isCreated());
         mvc.perform(post("/api/configurations/22/copy").contentType(APPLICATION_JSON).content("{\"newIndex\":23,\"newName\":\"副本\"}"))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.bcompIndex").value(23));
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_TASK where BCOMP_INDEX=23",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_TASK_NEW where BCOMP_INDEX=23",Integer.class)).isZero();
         mvc.perform(get("/api/configuration-options")).andExpect(status().isOk())
             .andExpect(jsonPath("$.states[0]").value("1"));
     }

@@ -15,6 +15,8 @@ cp compare-spark/target/compare-spark-1.0.0-SNAPSHOT.jar "$bundle/jobs/"
 cp compare-spark/target/jdbc/*.jar "$bundle/drivers/"
 cp config/application-local.properties.example "$bundle/config/"
 cp bin/start.sh "$bundle/bin/"
+cp start.sh stop.sh "$bundle/"
+cp -R sql "$bundle/"
 cp README.md "$bundle/"
 tar -czf "$staging_dir/tss-compare-1.0.0-SNAPSHOT.tar.gz" -C "$staging_dir" tss-compare
 mv "$staging_dir/tss-compare-1.0.0-SNAPSHOT.tar.gz" target/

@@ -71,7 +71,7 @@ class DatabaseManagementApiTest {
             .andExpect(status().isCreated()).andExpect(jsonPath("$.passwordConfigured").value(true))
             .andReturn().getResponse().getContentAsString();
         assertThat(response).doesNotContain("plain-password").doesNotContain("generater");
-        var row = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7");
+        var row = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7");
         assertThat(row.get("DATABASE_PASSWORD")).isNotEqualTo("plain-password");
         assertThat(PasswordEncryption.decrypt(row.get("DATABASE_PASSWORD").toString(), row.get("DATABASE_GENERATERKEY").toString())).isEqualTo("plain-password");
     }
@@ -82,7 +82,7 @@ class DatabaseManagementApiTest {
             """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("CURRENT_SCHEMA_REQUIRED"));
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_DATABASE_CONFIG", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_DATABASE_CONFIG_NEW", Integer.class)).isZero();
     }
 
     @Test void rejectsDraftCompatibleConnectionBeforeCallingProbe() throws Exception {
@@ -95,7 +95,7 @@ class DatabaseManagementApiTest {
     }
 
     @Test void rejectsTestingSavedLegacyCompatibleConnectionBeforeCallingProbe() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG values(7,'legacy','jdbc:postgresql://db/core','reader','secret','org.postgresql.Driver','0',null)");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG_NEW values(7,'legacy','jdbc:postgresql://db/core','reader','secret','org.postgresql.Driver','0',null)");
 
         mvc.perform(post("/api/databases/7/test"))
             .andExpect(status().isBadRequest())
@@ -107,21 +107,21 @@ class DatabaseManagementApiTest {
         mvc.perform(post("/api/databases").contentType(APPLICATION_JSON).content("""
             {"databaseId":7,"databaseName":"old","url":"jdbc:old","user":"u","driver":"D","encryption":"1","newPassword":"secret"}
             """)).andExpect(status().isCreated());
-        var before = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7");
+        var before = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7");
 
         mvc.perform(put("/api/databases/7").contentType(APPLICATION_JSON).content("""
             {"databaseId":7,"databaseName":"renamed","url":"jdbc:new","user":"u2","driver":"D2","encryption":"1","newPassword":""}
             """)).andExpect(status().isOk()).andExpect(jsonPath("$.databaseName").value("renamed"));
 
-        var after = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7");
+        var after = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7");
         assertThat(after).isEqualTo(before);
     }
 
     @Test void rejectsUpdateWhenWaitingTaskReferencesConnection() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) values(7,'db','jdbc:x','u','p','D','0')");
-        jdbc.update("insert into TSS_BCOMP_CONF(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE) values(22,'c','2')");
-        jdbc.update("insert into TSS_BCOMP_TABLE_SQL values(22,7,7,'O','N')");
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','1','EOD','1')");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) values(7,'db','jdbc:x','u','p','D','0')");
+        jdbc.update("insert into TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE) values(22,'c','2')");
+        jdbc.update("insert into TSS_BCOMP_TABLE_SQL_NEW values(22,7,7,'O','N')");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','1','EOD','1')");
 
         mvc.perform(put("/api/databases/7").contentType(APPLICATION_JSON).content("""
             {"databaseId":7,"databaseName":"db","url":"jdbc:y","user":"u","driver":"D","encryption":"0","newPassword":""}
@@ -129,7 +129,7 @@ class DatabaseManagementApiTest {
     }
 
     @Test void listsWithoutPasswordOrKeyProperties() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG values(7,'db','jdbc:x','u','cipher','D','1','key')");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG_NEW values(7,'db','jdbc:x','u','cipher','D','1','key')");
         String response = mvc.perform(get("/api/databases"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
             .andReturn().getResponse().getContentAsString();
@@ -146,7 +146,7 @@ class DatabaseManagementApiTest {
             .andExpect(jsonPath("$.databaseVersion").value("V500"));
 
         assertThat(jdbc.queryForObject(
-            "select count(*) from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=9",
+            "select count(*) from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=9",
             Integer.class
         )).isZero();
         assertThat(recorded.get().password()).isEqualTo("draft-secret");
@@ -155,7 +155,7 @@ class DatabaseManagementApiTest {
     @Test void savedTestDecryptsPasswordWithoutReturningOrChangingIt() throws Exception {
         createEncryptedConnection();
         var before = jdbc.queryForMap(
-            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7"
+            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7"
         );
 
         String response = mvc.perform(post("/api/databases/7/test"))
@@ -164,7 +164,7 @@ class DatabaseManagementApiTest {
             .andReturn().getResponse().getContentAsString();
 
         var after = jdbc.queryForMap(
-            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7"
+            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7"
         );
         assertThat(recorded.get().password()).isEqualTo("secret");
         assertThat(after).isEqualTo(before);
@@ -174,7 +174,7 @@ class DatabaseManagementApiTest {
     @Test void temporarySavedPasswordIsRequestOnly() throws Exception {
         createEncryptedConnection();
         var before = jdbc.queryForMap(
-            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7"
+            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7"
         );
 
         mvc.perform(post("/api/databases/7/test").contentType(APPLICATION_JSON)
@@ -183,7 +183,7 @@ class DatabaseManagementApiTest {
 
         assertThat(recorded.get().password()).isEqualTo("temporary");
         assertThat(jdbc.queryForMap(
-            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7"
+            "select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=7"
         )).isEqualTo(before);
     }
 

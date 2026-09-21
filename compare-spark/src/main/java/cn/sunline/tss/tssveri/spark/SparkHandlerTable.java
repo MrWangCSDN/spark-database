@@ -162,11 +162,11 @@ public class SparkHandlerTable {
         PreparedStatement finalPs4 = null;
         Class.forName(args[tssDataSourceDriver]).newInstance();
         connectionOut = DriverManager.getConnection(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword]);
-        finalPs2 = connectionOut.prepareStatement("update tss_bcomp_task set FILE1_ACOUNT = ? , FILE2_ACOUNT = ?  " +
+        finalPs2 = connectionOut.prepareStatement("update tss_bcomp_task_new set FILE1_ACOUNT = ? , FILE2_ACOUNT = ?  " +
                 "where BCOMP_INDEX = ? and TASK_BUSI_DATE = ? and TASK_BATCH = ? and BCOMP_TIME_NODE = ?");
-        finalPs3 = connectionOut.prepareStatement("update tss_bcomp_task set TASK_STATE = ? , FTASK_REASON = ?,TASK_RESULT = ?  " +
+        finalPs3 = connectionOut.prepareStatement("update tss_bcomp_task_new set TASK_STATE = ? , FTASK_REASON = ?,TASK_RESULT = ?  " +
                 "where BCOMP_INDEX = ? and TASK_BUSI_DATE = ? and TASK_BATCH = ? and BCOMP_TIME_NODE = ?");
-        finalPs4 = connectionOut.prepareStatement("update tss_bcomp_task set FILE1_SCOUNT = ?,FILE1_FCOUNT = ?,FILE2_SCOUNT = ?, " +
+        finalPs4 = connectionOut.prepareStatement("update tss_bcomp_task_new set FILE1_SCOUNT = ?,FILE1_FCOUNT = ?,FILE2_SCOUNT = ?, " +
                 "FILE2_FCOUNT = ?,TASK_STATE = ?,FTASK_REASON = ?,TASK_RESULT = ?,END_DATETIME = ? " +
                 "WHERE BCOMP_INDEX = ? AND TASK_BUSI_DATE = ? AND TASK_BATCH = ?");
 
@@ -188,7 +188,7 @@ public class SparkHandlerTable {
 
             //解析新老两侧的读取计划（HASH/RANGE/NTILE/普通读取，含legacy降级原因）
             ReadPlan readPlan = resolveReadPlan(args, tssBcompFieldDataRows, shardConf);
-            //回写实际读取策略到TSS_BCOMP_TASK.BCOMP_READ_MODE，运维可见降级事实（列不存在时只告警）
+            //回写实际读取策略到TSS_BCOMP_TASK_NEW.BCOMP_READ_MODE，运维可见降级事实（列不存在时只告警）
             writeReadMode(connectionOut, readPlan, args);
 
             //枚举/忽略值改为executor分区内自加载：这两张表可能是数据级规模(如按账号/流水号配置忽略值)，
@@ -197,7 +197,7 @@ public class SparkHandlerTable {
                     .filter(row -> enumFieldType.equals((String) row.getAs("FIELD_TYPE")))
                     .map(row -> row.getAs("FIELD_ENUM_INDEX"))
                     .filter(Objects::nonNull)
-                    .map(v -> String.valueOf(((BigDecimal) v).intValue()))
+                    .map(v -> String.valueOf(((Number) v).intValue()))
                     .distinct()
                     .collect(Collectors.joining(","));
             String ignoreIdCsv = tssBcompFieldDataRows.stream()
@@ -229,7 +229,7 @@ public class SparkHandlerTable {
                 PreparedStatement finalPs5 = null;
                 Class.forName(args[tssDataSourceDriver]).newInstance();
                 connectionInner = DriverManager.getConnection(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword]);
-                finalPs1 = connectionInner.prepareStatement("insert into TSS_BCOMP_DTL(bcomp_index,task_date,task_batch," +
+                finalPs1 = connectionInner.prepareStatement("insert into TSS_BCOMP_DTL_NEW(bcomp_index,task_date,task_batch," +
                         "comp_index_str,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON) " +
                         "values (?,?,?,?,?,?,?,?)");
                 finalPs5 = connectionInner.prepareStatement("SELECT * FROM TSS_BCOMP_DIFFFIELD WHERE bcomp_index = ?");
@@ -448,16 +448,16 @@ public class SparkHandlerTable {
     }
 
     /**
-     * 获取tss_bcomp_field数据
+     * 获取tss_bcomp_field_new数据
      * @param sc  spark
      * @param args 参数数组
-     * @return List<Row> tss_bcomp_field数据
+     * @return List<Row> tss_bcomp_field_new数据
      * @throws Exception 获取数据异常
      */
     private static List<Row> getTssBcompFieldData(SparkSession sc, String[] args) throws Exception {
 
         //回放数据库信息
-        String tssbcompfieldSql = "(select * from tss_bcomp_field where bcomp_index = ? order by FIELD_OLD_INDEX)  tss_bcomp_field"  ;
+        String tssbcompfieldSql = "(select * from tss_bcomp_field_new where bcomp_index = ? order by FIELD_OLD_INDEX)  tss_bcomp_field_new"  ;
         String finalSql = tssbcompfieldSql.replaceFirst("\\?", String.valueOf(args[bcompIndex]));
 
         Map<String, String> tssDataSouceProperties = buildJdbcConfig(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword], args[tssDataSourceDriver], finalSql);
@@ -467,8 +467,8 @@ public class SparkHandlerTable {
         //获取tssBcompField集合
         List<Row> tssBcompFieldDataRows = rowDataset.collectAsList();
         if (tssBcompFieldDataRows == null || tssBcompFieldDataRows.isEmpty()){
-            log.error("tss_bcomp_field表中bcomp_index ： {} 配置为空，请检查!",args[bcompIndex]);
-            throw new Exception("tss_bcomp_field表中bcomp_index ： " + args[bcompIndex] + " 配置为空，请检查!");
+            log.error("tss_bcomp_field_new表中bcomp_index ： {} 配置为空，请检查!",args[bcompIndex]);
+            throw new Exception("tss_bcomp_field_new表中bcomp_index ： " + args[bcompIndex] + " 配置为空，请检查!");
         }
         return tssBcompFieldDataRows;
     }
@@ -522,7 +522,7 @@ public class SparkHandlerTable {
     private static boolean compareEnumType(Row row, String oldString, String newString,
                                            ArrayList<String> diffNameList, HashMap<Integer, HashMap<String, String>> bcompEnumMap) {
         String fieldName = row.getAs("FIELD_NAME");
-        BigDecimal fieldEnumIndex = row.getAs("FIELD_ENUM_INDEX");
+        Number fieldEnumIndex = row.getAs("FIELD_ENUM_INDEX");
         String AA  = oldString == null ? "" : oldString.trim();
         String BB  = newString == null ? "" : newString.trim();
 
@@ -665,8 +665,8 @@ public class SparkHandlerTable {
     }
 
     /**
-     * 从 tss_bcomp_field 数据中获取分区列名（FIELD_PARTITION_FLAG='1'的字段）
-     * @param tssBcompFieldDataRows tss_bcomp_field表数据
+     * 从 tss_bcomp_field_new 数据中获取分区列名（FIELD_PARTITION_FLAG='1'的字段）
+     * @param tssBcompFieldDataRows tss_bcomp_field_new表数据
      * @return String 分区列名，未配置时返回null
      */
     private static String getPartitionColumn(List<Row> tssBcompFieldDataRows) {
@@ -674,11 +674,11 @@ public class SparkHandlerTable {
             String partitionFlag = row.getAs("FIELD_PARTITION_FLAG");
             if ("1".equals(partitionFlag)) {
                 String fieldName = row.getAs("FIELD_NAME");
-                log.info("从tss_bcomp_field获取分区列: {}", fieldName);
+                log.info("从tss_bcomp_field_new获取分区列: {}", fieldName);
                 return fieldName;
             }
         }
-        log.info("tss_bcomp_field中未配置分区列(FIELD_PARTITION_FLAG='1')");
+        log.info("tss_bcomp_field_new中未配置分区列(FIELD_PARTITION_FLAG='1')");
         return null;
     }
 
@@ -697,7 +697,7 @@ public class SparkHandlerTable {
             Class.forName(args[tssDataSourceDriver]);
             try (Connection conn = DriverManager.getConnection(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword])) {
                 // Read strategy first: once HASH is known, neither invalid counts nor query failures may fall back.
-                try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_SHARD_STRATEGY FROM TSS_BCOMP_CONF WHERE BCOMP_INDEX = ?")) {
+                try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_SHARD_STRATEGY FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX = ?")) {
                     ps.setString(1, args[bcompIndex]);
                     try (ResultSet rs = ps.executeQuery()) {
                         if (rs.next()) {
@@ -707,10 +707,10 @@ public class SparkHandlerTable {
                     }
                 } catch (SQLException e) {
                     if (!isMissingShardStrategyColumn(e)) throw e;
-                    log.info("TSS_BCOMP_CONF缺少BCOMP_SHARD_STRATEGY，使用legacy RANGE: {}", e.getMessage());
+                    log.info("TSS_BCOMP_CONF_NEW缺少BCOMP_SHARD_STRATEGY，使用legacy RANGE: {}", e.getMessage());
                 }
                 strategyRead = true;
-                try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF WHERE BCOMP_INDEX = ?")) {
+                try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX = ?")) {
                     ps.setString(1, args[bcompIndex]);
                     try (ResultSet rs = ps.executeQuery()) {
                         if (rs.next()) configuredNum = "HASH".equals(strategy) ? rs.getObject(1) : rs.getInt(1);
@@ -918,12 +918,12 @@ public class SparkHandlerTable {
     }
 
     /**
-     * 把本次核对两侧「实际采用」的读取策略回写 TSS_BCOMP_TASK.BCOMP_READ_MODE。
+     * 把本次核对两侧「实际采用」的读取策略回写 TSS_BCOMP_TASK_NEW.BCOMP_READ_MODE。
      * 该列可能不存在（DDL 未执行），此时只告警不影响核对，保证生产环境无 Spark 日志重定向时运维仍可见降级事实。
      */
     private static void writeReadMode(Connection conn, ReadPlan plan, String[] args) {
         String desc = plan.describe();
-        try (PreparedStatement ps = conn.prepareStatement("update tss_bcomp_task set BCOMP_READ_MODE = ? " +
+        try (PreparedStatement ps = conn.prepareStatement("update tss_bcomp_task_new set BCOMP_READ_MODE = ? " +
                 "where BCOMP_INDEX = ? and TASK_BUSI_DATE = ? and TASK_BATCH = ? and BCOMP_TIME_NODE = ?")) {
             ps.setString(1, desc);
             ps.setString(2, args[bcompIndex]);
@@ -1387,7 +1387,7 @@ public class SparkHandlerTable {
     }
 
     /**
-     * 批量写入 TSS_BCOMP_DTL：col5=LINE_CONTENT1(老), col6=LINE_CONTENT2(新), col7=LINE_RESULT, col8=FDTL_REASON。
+     * 批量写入 TSS_BCOMP_DTL_NEW：col5=LINE_CONTENT1(老), col6=LINE_CONTENT2(新), col7=LINE_RESULT, col8=FDTL_REASON。
      * oldRow/newRow 为 null 时对应侧内容置空串。
      */
     private static void insertRowToDtl(String flag, PreparedStatement ps, String[] args, String key,
@@ -1429,7 +1429,7 @@ public class SparkHandlerTable {
             ps.executeBatch();
             ps.clearBatch();
         } catch (SQLException e) {
-            log.error("批量写入TSS_BCOMP_DTL失败: {}", e.getMessage());
+            log.error("批量写入TSS_BCOMP_DTL_NEW失败: {}", e.getMessage());
         }
     }
 
@@ -1543,7 +1543,7 @@ public class SparkHandlerTable {
             ArrayList<String> valueList= new ArrayList<>();
 
             for (Row tssBcompFieldDataRow : bcField.value()) {
-                int fieldIndex = ((BigDecimal)tssBcompFieldDataRow.getAs(type)).intValue();
+                int fieldIndex = ((Number)tssBcompFieldDataRow.getAs(type)).intValue();
                 String fieldType = (String)tssBcompFieldDataRow.getAs("FIELD_TYPE");
                 String indexFlag = (String)tssBcompFieldDataRow.getAs("FIELD_INDEX_FLAG");
                 String value = null == line.get(fieldIndex-1) ?  "" : line.get(fieldIndex-1).toString().trim();

@@ -1,15 +1,52 @@
+<?xml version="1.0"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion><parent><groupId>cn.sunline.tss</groupId><artifactId>tss-compare</artifactId><version>1.0.0-SNAPSHOT</version></parent>
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>cn.sunline.tss</groupId>
+    <artifactId>tss-compare</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
   <artifactId>compare-service</artifactId>
   <dependencies>
-    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
-    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>
-    <dependency><groupId>org.apache.spark</groupId><artifactId>spark-launcher_2.12</artifactId><version>${spark.version}</version></dependency>
-    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>runtime</scope></dependency>
-    <dependency><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc8</artifactId><version>21.9.0.0</version><scope>runtime</scope></dependency>
-    <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId><scope>runtime</scope></dependency>
-    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
-    <dependency><groupId>com.h2database</groupId><artifactId>h2</artifactId><scope>test</scope></dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-launcher_2.12</artifactId>
+      <version>${spark.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.oracle.database.jdbc</groupId>
+      <artifactId>ojdbc8</artifactId>
+      <version>21.9.0.0</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <plugins>
@@ -24,21 +61,44 @@
         <executions>
           <execution>
             <id>install-node-and-npm</id>
-            <goals><goal>install-node-and-npm</goal></goals>
+            <goals>
+              <goal>install-node-and-npm</goal>
+            </goals>
             <phase>generate-resources</phase>
-            <configuration><nodeVersion>v22.14.0</nodeVersion><npmVersion>10.9.2</npmVersion></configuration>
+            <configuration>
+              <nodeVersion>v22.14.0</nodeVersion>
+              <npmVersion>10.9.2</npmVersion>
+            </configuration>
           </execution>
           <execution>
-            <id>npm-ci</id><goals><goal>npm</goal></goals><phase>generate-resources</phase>
-            <configuration><arguments>ci</arguments></configuration>
+            <id>npm-ci</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <phase>generate-resources</phase>
+            <configuration>
+              <arguments>ci</arguments>
+            </configuration>
           </execution>
           <execution>
-            <id>frontend-test</id><goals><goal>npm</goal></goals><phase>generate-resources</phase>
-            <configuration><arguments>test -- --run</arguments></configuration>
+            <id>frontend-test</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <phase>generate-resources</phase>
+            <configuration>
+              <arguments>test -- --run</arguments>
+            </configuration>
           </execution>
           <execution>
-            <id>frontend-build</id><goals><goal>npm</goal></goals><phase>generate-resources</phase>
-            <configuration><arguments>run build</arguments></configuration>
+            <id>frontend-build</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <phase>generate-resources</phase>
+            <configuration>
+              <arguments>run build</arguments>
+            </configuration>
           </execution>
         </executions>
       </plugin>
@@ -49,15 +109,27 @@
           <execution>
             <id>copy-management-console</id>
             <phase>process-resources</phase>
-            <goals><goal>copy-resources</goal></goals>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
             <configuration>
               <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
-              <resources><resource><directory>${project.parent.basedir}/compare-ui/dist</directory></resource></resources>
+              <resources>
+                <resource>
+                  <directory>${project.parent.basedir}/compare-ui/dist</directory>
+                </resource>
+              </resources>
             </configuration>
           </execution>
         </executions>
       </plugin>
-      <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><configuration><layout>ZIP</layout></configuration></plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <layout>ZIP</layout>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

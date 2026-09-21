@@ -21,7 +21,7 @@ import java.util.List;
 public class TaskManagementRepository {
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.BASIC_ISO_DATE;
-    private static final String SELECT_TASK = "SELECT t.BCOMP_INDEX,c.BCOMP_NAME,t.TASK_BUSI_DATE,t.VERIFY_BUSINESS_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.CREATE_DATETIME,t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE FROM TSS_BCOMP_TASK t JOIN TSS_BCOMP_CONF c ON c.BCOMP_INDEX=t.BCOMP_INDEX ";
+    private static final String SELECT_TASK = "SELECT t.BCOMP_INDEX,c.BCOMP_NAME,t.TASK_BUSI_DATE,t.VERIFY_BUSINESS_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.CREATE_DATETIME,t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE FROM TSS_BCOMP_TASK_NEW t JOIN TSS_BCOMP_CONF_NEW c ON c.BCOMP_INDEX=t.BCOMP_INDEX ";
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
@@ -36,11 +36,11 @@ public class TaskManagementRepository {
     ConfigurationStatus configurationStatus(long index) {
         List<ConfigurationStatus> rows = jdbc.query("""
             SELECT c.BCOMP_NAME,c.BCOMP_DATE_MODE,
-              (SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL s WHERE s.BCOMP_INDEX=c.BCOMP_INDEX),
-              (SELECT COUNT(*) FROM TSS_BCOMP_FIELD f WHERE f.BCOMP_INDEX=c.BCOMP_INDEX),
-              (SELECT COUNT(*) FROM TSS_BCOMP_FIELD f WHERE f.BCOMP_INDEX=c.BCOMP_INDEX AND f.FIELD_INDEX_FLAG='1'),
-              (SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL s JOIN TSS_BCOMP_DATABASE_CONFIG d1 ON d1.DATABASE_ID=s.ORIG_DATABASE_ID JOIN TSS_BCOMP_DATABASE_CONFIG d2 ON d2.DATABASE_ID=s.DEST_DATABASE_ID WHERE s.BCOMP_INDEX=c.BCOMP_INDEX)
-            FROM TSS_BCOMP_CONF c WHERE c.BCOMP_INDEX=? AND c.BCOMP_TYPE='2'
+              (SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL_NEW s WHERE s.BCOMP_INDEX=c.BCOMP_INDEX),
+              (SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW f WHERE f.BCOMP_INDEX=c.BCOMP_INDEX),
+              (SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW f WHERE f.BCOMP_INDEX=c.BCOMP_INDEX AND f.FIELD_INDEX_FLAG='1'),
+              (SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL_NEW s JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d1 ON d1.DATABASE_ID=s.ORIG_DATABASE_ID JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d2 ON d2.DATABASE_ID=s.DEST_DATABASE_ID WHERE s.BCOMP_INDEX=c.BCOMP_INDEX)
+            FROM TSS_BCOMP_CONF_NEW c WHERE c.BCOMP_INDEX=? AND c.BCOMP_TYPE='2'
             """, (rs, n) -> new ConfigurationStatus(rs.getString(1), rs.getString(2),
             rs.getInt(3), rs.getInt(4), rs.getInt(5), rs.getInt(6)), index);
         return rows.isEmpty() ? null : rows.get(0);
@@ -49,9 +49,9 @@ public class TaskManagementRepository {
     ConfigurationConnections configurationConnections(long index) {
         List<ConfigurationConnections> rows = jdbc.query("""
             SELECT o.DATABASE_URL,o.DATABASE_DRIVER,d.DATABASE_URL,d.DATABASE_DRIVER
-            FROM TSS_BCOMP_TABLE_SQL s
-            JOIN TSS_BCOMP_DATABASE_CONFIG o ON o.DATABASE_ID=s.ORIG_DATABASE_ID
-            JOIN TSS_BCOMP_DATABASE_CONFIG d ON d.DATABASE_ID=s.DEST_DATABASE_ID
+            FROM TSS_BCOMP_TABLE_SQL_NEW s
+            JOIN TSS_BCOMP_DATABASE_CONFIG_NEW o ON o.DATABASE_ID=s.ORIG_DATABASE_ID
+            JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d ON d.DATABASE_ID=s.DEST_DATABASE_ID
             WHERE s.BCOMP_INDEX=?
             """, (rs, n) -> new ConfigurationConnections(
                 new DatabaseEndpoint(rs.getString(1), rs.getString(2)),
@@ -61,7 +61,7 @@ public class TaskManagementRepository {
     }
 
     boolean identityExists(long index, String date, String batch) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=?",
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=?",
             Integer.class, index, date, batch);
         return count != null && count > 0;
     }
@@ -70,7 +70,7 @@ public class TaskManagementRepository {
         return transaction.execute(status -> {
             if (identityExists(request.bcompIndex(), request.taskBusinessDate(), request.taskBatch())) return null;
             String created = LocalDateTime.now().format(TIMESTAMP);
-            jdbc.update("INSERT INTO TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,VERIFY_BUSINESS_DATE,TASK_BATCH,CREATE_DATETIME,BCOMP_TIME_NODE,TASK_STATE) VALUES(?,?,?,?,?,?, '1')",
+            jdbc.update("INSERT INTO TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,VERIFY_BUSINESS_DATE,TASK_BATCH,CREATE_DATETIME,BCOMP_TIME_NODE,TASK_STATE) VALUES(?,?,?,?,?,?, '1')",
                 request.bcompIndex(), request.taskBusinessDate(), emptyToNull(request.verifyBusinessDate()),
                 request.taskBatch(), created, request.timeNode());
             return new TaskSummary(request.bcompIndex(), configurationName, request.taskBusinessDate(),
@@ -92,7 +92,7 @@ public class TaskManagementRepository {
             String pattern = "%" + search.keyword().toLowerCase() + "%";
             params.add(pattern); params.add(pattern);
         }
-        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK t JOIN TSS_BCOMP_CONF c ON c.BCOMP_INDEX=t.BCOMP_INDEX" + where,
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW t JOIN TSS_BCOMP_CONF_NEW c ON c.BCOMP_INDEX=t.BCOMP_INDEX" + where,
             Long.class, params.toArray());
         List<Object> pageParams = new ArrayList<>(params);
         pageParams.add(search.page() * search.size()); pageParams.add(search.size());
@@ -113,9 +113,9 @@ public class TaskManagementRepository {
         var params = new ArrayList<Object>(List.of(index, date, batch));
         add(where, params, "LINE_RESULT=?", blankToNull(lineResult));
         add(where, params, "COMP_INDEX_STR=?", blankToNull(businessKey));
-        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DTL" + where, Long.class, params.toArray());
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW" + where, Long.class, params.toArray());
         params.add(page * size); params.add(size);
-        List<DifferenceSummary> items = jdbc.query("SELECT COMP_INDEX_STR,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON FROM TSS_BCOMP_DTL" + where + " ORDER BY COMP_INDEX_STR OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
+        List<DifferenceSummary> items = jdbc.query("SELECT COMP_INDEX_STR,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON FROM TSS_BCOMP_DTL_NEW" + where + " ORDER BY COMP_INDEX_STR OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
             (rs, n) -> new DifferenceSummary(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)), params.toArray());
         return new PageResult<>(items, page, size, total == null ? 0 : total);
     }
@@ -131,7 +131,7 @@ public class TaskManagementRepository {
     }
 
     private long count(String condition, Object[] params) {
-        Long value = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK WHERE " + condition, Long.class, params);
+        Long value = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW WHERE " + condition, Long.class, params);
         return value == null ? 0 : value;
     }
 

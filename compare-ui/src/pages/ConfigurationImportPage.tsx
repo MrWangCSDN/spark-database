@@ -48,7 +48,7 @@ export function ConfigurationImportPage() {
     <Link className="back-link" to="/configurations">← 返回核对配置</Link>
     <div className="page-heading"><div><span className="eyebrow">AXON CONFIG IMPORT</span><h1>导入 Axon 配置</h1><p>执行 Axon-Link 已生成的三表 SQL，完成后再到任务页创建 Spark 核对任务。</p></div><button className="button primary" disabled={mutation.isPending}>{mutation.isPending ? '导入中…' : '执行导入'}</button></div>
 
-    <div className="notice warning" role="note"><div><strong>该操作会整体替换核对配置</strong><p>脚本会清空并重建 TSS_BCOMP_CONF、TSS_BCOMP_FIELD、TSS_BCOMP_TABLE_SQL。存在等待或运行任务时后端会拒绝执行。</p></div></div>
+    <div className="notice warning" role="note"><div><strong>该操作会整体替换核对配置</strong><p>脚本会清空并重建 TSS_BCOMP_CONF_NEW、TSS_BCOMP_FIELD_NEW、TSS_BCOMP_TABLE_SQL_NEW。存在等待或运行任务时后端会拒绝执行。</p></div></div>
     <SaveWarning message={result?.warning} savedTitle="配置已导入" successMessage="新配置已加载到当前服务实例。" />
     {validation && <div className="notice error" role="alert">{validation}</div>}
     {result && <section className="import-result" aria-label="导入结果"><div><span>配置</span><strong>已导入 {result.configurationCount} 个配置</strong></div><div><span>字段</span><strong>{result.fieldCount} 个字段</strong></div><div><span>两侧 SQL</span><strong>{result.tableSqlCount} 条</strong></div></section>}

@@ -86,9 +86,9 @@ final class AxonConfigScriptParser {
         if (statement.isEmpty()) return;
         if (state.committed) invalid();
         if (state.step == 0 && statement.equalsIgnoreCase("START TRANSACTION")) { state.step++; return; }
-        if (state.step == 1 && truncate(statement, "tss_bcomp_field")) { executor.accept(Command.clear("TSS_BCOMP_FIELD")); state.step++; return; }
-        if (state.step == 2 && truncate(statement, "tss_bcomp_table_sql")) { executor.accept(Command.clear("TSS_BCOMP_TABLE_SQL")); state.step++; return; }
-        if (state.step == 3 && truncate(statement, "tss_bcomp_conf")) { executor.accept(Command.clear("TSS_BCOMP_CONF")); state.step++; return; }
+        if (state.step == 1 && truncate(statement, "tss_bcomp_field_new")) { executor.accept(Command.clear("TSS_BCOMP_FIELD_NEW")); state.step++; return; }
+        if (state.step == 2 && truncate(statement, "tss_bcomp_table_sql_new")) { executor.accept(Command.clear("TSS_BCOMP_TABLE_SQL_NEW")); state.step++; return; }
+        if (state.step == 3 && truncate(statement, "tss_bcomp_conf_new")) { executor.accept(Command.clear("TSS_BCOMP_CONF_NEW")); state.step++; return; }
         if (state.step < 4) invalid();
         if (statement.equalsIgnoreCase("COMMIT")) {
             if (state.phase != 2 || state.confRows < 1 || state.fieldRows < 1 || state.sqlRows != state.confRows) invalid();
@@ -101,10 +101,10 @@ final class AxonConfigScriptParser {
         List<String> columns = Pattern.compile("\\s*,\\s*").splitAsStream(matcher.group(2).trim()).map(value -> value.toLowerCase(Locale.ROOT)).toList();
         List<String> expected;
         int phase;
-        boolean hashConfiguration = table.equals("tss_bcomp_conf") && columns.equals(HASH_CONF_COLUMNS);
-        if (table.equals("tss_bcomp_conf")) { expected=hashConfiguration ? HASH_CONF_COLUMNS : CONF_COLUMNS; phase=0; }
-        else if (table.equals("tss_bcomp_field")) { expected=FIELD_COLUMNS; phase=1; }
-        else if (table.equals("tss_bcomp_table_sql")) { expected=SQL_COLUMNS; phase=2; }
+        boolean hashConfiguration = table.equals("tss_bcomp_conf_new") && columns.equals(HASH_CONF_COLUMNS);
+        if (table.equals("tss_bcomp_conf_new")) { expected=hashConfiguration ? HASH_CONF_COLUMNS : CONF_COLUMNS; phase=0; }
+        else if (table.equals("tss_bcomp_field_new")) { expected=FIELD_COLUMNS; phase=1; }
+        else if (table.equals("tss_bcomp_table_sql_new")) { expected=SQL_COLUMNS; phase=2; }
         else { invalid(); return; }
         if (!columns.equals(expected) || phase < state.phase || phase > state.phase + 1) invalid();
         if (phase > state.phase && (state.phase == 0 ? state.confRows : state.fieldRows) == 0) invalid();

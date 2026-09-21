@@ -17,31 +17,31 @@ public class DatabaseManagementRepository {
     }
 
     PageResult<DatabaseSummary> list(int page, int size) {
-        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DATABASE_CONFIG", Long.class);
-        List<DatabaseSummary> items = jdbc.query("SELECT DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_PASSWORD FROM TSS_BCOMP_DATABASE_CONFIG ORDER BY DATABASE_ID OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DATABASE_CONFIG_NEW", Long.class);
+        List<DatabaseSummary> items = jdbc.query("SELECT DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_PASSWORD FROM TSS_BCOMP_DATABASE_CONFIG_NEW ORDER BY DATABASE_ID OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
             (rs,n) -> new DatabaseSummary(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7)!=null && !rs.getString(7).isEmpty()),
             page * size, size);
         return new PageResult<>(items,page,size,total==null?0:total);
     }
 
     StoredDatabase find(long id) {
-        List<StoredDatabase> rows=jdbc.query("SELECT DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY FROM TSS_BCOMP_DATABASE_CONFIG WHERE DATABASE_ID=?",
+        List<StoredDatabase> rows=jdbc.query("SELECT DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY FROM TSS_BCOMP_DATABASE_CONFIG_NEW WHERE DATABASE_ID=?",
             (rs,n)->new StoredDatabase(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getString(8)),id);
         return rows.isEmpty()?null:rows.get(0);
     }
 
     boolean inUse(long id) {
-        Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK t JOIN TSS_BCOMP_TABLE_SQL s ON s.BCOMP_INDEX=t.BCOMP_INDEX WHERE t.TASK_STATE IN ('1','2') AND (s.ORIG_DATABASE_ID=? OR s.DEST_DATABASE_ID=?)",Integer.class,id,id);
+        Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW t JOIN TSS_BCOMP_TABLE_SQL_NEW s ON s.BCOMP_INDEX=t.BCOMP_INDEX WHERE t.TASK_STATE IN ('1','2') AND (s.ORIG_DATABASE_ID=? OR s.DEST_DATABASE_ID=?)",Integer.class,id,id);
         return count!=null&&count>0;
     }
 
     void insert(StoredDatabase db) {
-        jdbc.update("INSERT INTO TSS_BCOMP_DATABASE_CONFIG(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY) VALUES(?,?,?,?,?,?,?,?)",
+        jdbc.update("INSERT INTO TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY) VALUES(?,?,?,?,?,?,?,?)",
             db.id(),db.name(),db.url(),db.user(),db.password(),db.driver(),db.encryption(),db.key());
     }
 
     void update(StoredDatabase db) {
-        jdbc.update("UPDATE TSS_BCOMP_DATABASE_CONFIG SET DATABASE_NAME=?,DATABASE_URL=?,DATABASE_USER=?,DATABASE_PASSWORD=?,DATABASE_DRIVER=?,DATABASE_ENCRYPTION=?,DATABASE_GENERATERKEY=? WHERE DATABASE_ID=?",
+        jdbc.update("UPDATE TSS_BCOMP_DATABASE_CONFIG_NEW SET DATABASE_NAME=?,DATABASE_URL=?,DATABASE_USER=?,DATABASE_PASSWORD=?,DATABASE_DRIVER=?,DATABASE_ENCRYPTION=?,DATABASE_GENERATERKEY=? WHERE DATABASE_ID=?",
             db.name(),db.url(),db.user(),db.password(),db.driver(),db.encryption(),db.key(),db.id());
     }
 

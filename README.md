@@ -2,28 +2,28 @@
 
 从 `/Users/wangshanhe/Downloads/tss-verisvr 2` 拆出的独立工程。运行时不依赖旧 tss-verisvr 服务、文件服务器或 Redis。
 
-- `compare-service`：Spring Boot 服务，轮询原任务表，只领取 `BCOMP_TYPE='2'` 库表任务，提交并等待 Spark。
+- `compare-service`：Spring Boot 服务，轮询 TSS_BCOMP_TASK_NEW，只领取 `BCOMP_TYPE='2'` 库表任务，提交并等待 Spark。
 - `compare-spark`：独立普通 JAR，保留原 `cn.sunline.tss.tssveri.spark.SparkHandlerTable` 和比对主体。
 - `compare-ui`：按独立服务 API 新开发的 React 管理台，随 `compare-service` JAR 同包发布。原工程没有页面源码，因此没有从其他工程拼接页面。
 
 ## 不变的兼容边界
 
-不提供生产建表、改表、迁移或配置初始化脚本。现有数据库及配置记录直接复用：
+通过 `sql/create_bcomp_new.sql` 新建六张空业务表；旧表及数据保留。枚举、忽略值和差异字段依赖继续复用：
 
-| 原表 | 用途 |
+| 运行时表 | 用途 |
 |---|---|
-| TSS_BCOMP_CONF | 核对类型、名称、分片等配置 |
-| TSS_BCOMP_DATABASE_CONFIG | 两侧连接信息及原AES密文/密钥 |
-| TSS_BCOMP_TABLE_SQL | 两侧SQL和数据库ID |
-| TSS_BCOMP_FIELD | 字段位置、类型、业务键、分区列、忽略规则 |
+| TSS_BCOMP_CONF_NEW | 核对类型、名称、分片等配置 |
+| TSS_BCOMP_DATABASE_CONFIG_NEW | 两侧连接信息及原AES密文/密钥 |
+| TSS_BCOMP_TABLE_SQL_NEW | 两侧SQL和数据库ID |
+| TSS_BCOMP_FIELD_NEW | 字段位置、类型、业务键、分区列、忽略规则 |
 | TSS_BCOMP_ENUM / TSS_IGNORE_VALUE | 枚举映射与忽略值 |
-| TSS_BCOMP_TASK | 原任务状态与统计 |
-| TSS_BCOMP_DTL | 原差异明细 |
+| TSS_BCOMP_TASK_NEW | 原任务状态与统计 |
+| TSS_BCOMP_DTL_NEW | 原差异明细 |
 | TSS_BCOMP_DIFFFIELD | 原作业保留的预编译查询依赖 |
 
 类型代码、从1开始的字段位置、`${HDRQ}`替换、`|+|`内容分隔符、重复键`#MD5`、明细结果代码全部保留。服务发送原来的21个位置参数。可选字段 `BCOMP_SHARD_STRATEGY`、`BCOMP_READ_MODE` 缺失时沿用原回退行为。
 
-Spark 源文件只改了入口的参数数量检查及明文参数日志；其余比对主体保持一致。原文件 SHA-256 见 `docs/migration/source-provenance.json`。
+Spark 保留原比对主体，已增加主键 HASH 分区、入口参数校验，并切换新元数据表及兼容 BIGINT/NUMERIC 字段位置。原文件 SHA-256 见 `docs/migration/source-provenance.json`。
 
 ## 构建与测试
 
@@ -44,6 +44,8 @@ bin/package-source.sh
 ```text
 target/tss-compare-1.0.0-SNAPSHOT.tar.gz
   tss-compare/
+    start.sh                  # 后台启动并记录bd.pid
+    stop.sh                   # SIGTERM优雅停止
     lib/compare-service-1.0.0-SNAPSHOT.jar
     jobs/compare-spark-1.0.0-SNAPSHOT.jar
     drivers/                  # Oracle/PostgreSQL/MySQL运行时驱动
@@ -84,9 +86,9 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
    - 华为原生协议：`jdbc:gaussdb://host:port/database?currentSchema=业务schema` 与现场厂商文档指定的驱动类；将有合法授权的原生驱动 JAR 放入 `drivers/`。
    - openGauss：按现场版本确认 JDBC URL，例如 `jdbc:opengauss://host:port/database?currentSchema=业务schema`，驱动类通常为 `org.opengauss.Driver`；将现场确认的驱动 JAR 放入 `drivers/`。
    PostgreSQL 驱动不能处理 `jdbc:gaussdb` 等其他协议。工程不下载或捆绑厂商闭源驱动。
-   `currentSchema` 参数名大小写不敏感，但解码后的值不能为空。已有不合规连接仍可查看，服务不会推断或自动改写 schema；再次保存、测试或用于新任务前必须人工补齐。该规则只约束 `TSS_BCOMP_DATABASE_CONFIG` 中的比对连接，不约束微服务自身的 `spring.datasource.*` 或 Spark 元数据库的 `spark.datasource.*`。
+   `currentSchema` 参数名大小写不敏感，但解码后的值不能为空。已有不合规连接仍可查看，服务不会推断或自动改写 schema；再次保存、测试或用于新任务前必须人工补齐。该规则只约束 `TSS_BCOMP_DATABASE_CONFIG_NEW` 中的比对连接，不约束微服务自身的 `spring.datasource.*` 或 Spark 元数据库的 `spark.datasource.*`。
 5. `bin/start.sh` 使用 Boot PropertiesLauncher 的 `loader.path` 把 `drivers/` 加入服务类路径，并通过 `COMPARE_SPARK_JARS` 将同目录 JAR 传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动绝对路径。原生驱动必须在每个 Spark 节点可读，Driver和Executor节点必须能访问原库、目标库、元数据库。
-6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值：
+6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值。也可写入发布目录的 `config/bd.env`，根目录 `start.sh` 会通过 `bin/start.sh` 自动加载：
 
 ```bash
 export JAVA_HOME=/path/to/jdk17
@@ -96,8 +98,10 @@ export TSS_METADATA_URL='jdbc:your-metadata-url'
 export TSS_METADATA_USER='your-user'
 export TSS_METADATA_PASSWORD='your-password'
 export TSS_METADATA_DRIVER='your.driver.Class'
-./bin/start.sh
+./start.sh
 ```
+
+根目录 `start.sh` 后台启动服务，将PID写入 `bd.pid`，控制台日志写入 `logs/bd-console.log`。执行 `./stop.sh` 发送 `SIGTERM` 并等待优雅退出；等待时间默认120秒，可通过 `BD_STOP_TIMEOUT_SECONDS` 调整，超时后不会自动强杀Spark作业。`bin/start.sh` 保留为前台启动入口，适合交给systemd等进程管理器。
 
 新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
 
@@ -131,7 +135,7 @@ mvn -pl compare-service -Dtest=GaussDbConnectionIntegrationTest test
 
 ## 接入 Axon 生成的配置脚本
 
-Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_CONF`、`TSS_BCOMP_FIELD`、`TSS_BCOMP_TABLE_SQL` 数据脚本。脚本只使用既有表和字段，不创建或修改生产表结构。管理台“核对配置 → 导入 Axon 配置”负责校验和执行该固定格式，不提供通用 SQL 控制台。
+Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_CONF_NEW`、`TSS_BCOMP_FIELD_NEW`、`TSS_BCOMP_TABLE_SQL_NEW` 数据脚本。脚本只使用既有表和字段，不创建或修改生产表结构。管理台“核对配置 → 导入 Axon 配置”负责校验和执行该固定格式，不提供通用 SQL 控制台。
 
 上线按以下顺序操作：
 
@@ -147,9 +151,9 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 
 新版 Axon-link 的单表“读取配置”仅向授权人员开放一个分区数输入，范围 1–256，默认 1；普通登记编辑不修改这一设置。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单；前端隐藏入口之外，写接口仍执行登录身份和名单校验。
 
-分区数进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy`，值为分区数和 `'HASH'`；业务键仍通过 `TSS_BCOMP_FIELD.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。比对端兼容旧脚本，新格式的非法分区数、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本仍按原配置处理。
+分区数进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy`，值为分区数和 `'HASH'`；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。比对端兼容旧脚本，新格式的非法分区数、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本仍按原配置处理。
 
-导入新脚本前，目标元数据库必须已具备 `TSS_BCOMP_CONF.BCOMP_PARTITION_NUM` 和 `BCOMP_SHARD_STRATEGY` 列（策略列需能保存 `HASH`）；应用不会自动修改生产表结构。旧版 Spark 不识别此哈希策略，必须同步升级服务和 Spark 作业 JAR，再使用新版脚本。历史版本已经生成的 SQL 保持不变，需要生成新版本才能携带调整后的分区数。
+导入新脚本前，目标元数据库必须已具备 `TSS_BCOMP_CONF_NEW.BCOMP_PARTITION_NUM` 和 `BCOMP_SHARD_STRATEGY` 列（策略列需能保存 `HASH`）；应用不会自动修改生产表结构。旧版 Spark 不识别此哈希策略，必须同步升级服务和 Spark 作业 JAR，再使用新版脚本。历史版本已经生成的 SQL 保持不变，需要生成新版本才能携带调整后的分区数。
 
 `HASH` 分区数为 1 时使用单分区读取；大于 1 时在数据库查询中按完整业务键生成互斥的哈希条件，由 Spark JDBC 并行读取各片，再执行既有核对逻辑。每侧实际读取方式写入 `BCOMP_READ_MODE`（目标列存在时）。不支持的数据库方言或不可用的哈希函数会明确失败，不自动伪装成单分区成功。
 
@@ -172,3 +176,12 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 日期解析、数值归一化、忽略值匹配、重复键的MD5比较、任务统计更新和失败处理保持原实现，因此既有行为和缺陷一起保留。源作业部分入库异常会吞掉、Spark重试可能重复插入明细；新服务的终态检查不能证明每一条明细都落库。后续应独立修复并做结果回归。
 
 没有真实GaussDB/Spark集群、现场配置和OOM日志，本地测试不能代替现场驱动兼容验证、全量性能压测。21参数为了兼容包含连接密码，虽然去除了主动打印，仍需限制操作系统进程信息和Spark作业详情的访问。
+
+
+## 六张业务表隔离部署
+
+执行 `sql/create_bcomp_new.sql` 创建六张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
+
+停止 bd 并等待在途 Spark 作业结束后，同步替换 service 和 Spark 两个 JAR。在数据库连接页面重新维护连接（Axon 脚本使用 ID 1 和 2），从 Axon 选择“新版本（_new 表）”下载并导入配置，再创建小任务测试。旧版本 SQL 不可导入本版 bd。枚举、忽略值及差异字段表仍复用现有表。
+
+回滚需同时恢复两个 JAR；新表数据不会自动复制回旧表。

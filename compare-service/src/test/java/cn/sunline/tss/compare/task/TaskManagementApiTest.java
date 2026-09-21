@@ -33,10 +33,10 @@ class TaskManagementApiTest {
         mvc = MockMvcBuilders.standaloneSetup(new TaskController(service), new DashboardController(service))
             .setControllerAdvice(new ApiExceptionHandler()).build();
 
-        jdbc.update("insert into TSS_BCOMP_CONF(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE,BCOMP_DATE_MODE,BCOMP_TIME_NODE,BCOMP_STATE) values(22,'客户余额核对','2','2','EOD','1')");
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) values(1,'old','jdbc:old','u','p','D','0'),(2,'new','jdbc:new','u','p','D','0')");
-        jdbc.update("insert into TSS_BCOMP_TABLE_SQL values(22,1,2,'OLD_SQL','NEW_SQL')");
-        jdbc.update("insert into TSS_BCOMP_FIELD(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_PARTITION_FLAG,FIELD_IGNORE_FLAG) values(22,'ID','1',1,1,'1','1','0')");
+        jdbc.update("insert into TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE,BCOMP_DATE_MODE,BCOMP_TIME_NODE,BCOMP_STATE) values(22,'客户余额核对','2','2','EOD','1')");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) values(1,'old','jdbc:old','u','p','D','0'),(2,'new','jdbc:new','u','p','D','0')");
+        jdbc.update("insert into TSS_BCOMP_TABLE_SQL_NEW values(22,1,2,'OLD_SQL','NEW_SQL')");
+        jdbc.update("insert into TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_PARTITION_FLAG,FIELD_IGNORE_FLAG) values(22,'ID','1',1,1,'1','1','0')");
     }
 
     @Test
@@ -49,7 +49,7 @@ class TaskManagementApiTest {
             .andExpect(jsonPath("$.configurationName").value("客户余额核对"))
             .andExpect(jsonPath("$.taskState").value("1"));
 
-        var row = jdbc.queryForMap("select * from TSS_BCOMP_TASK");
+        var row = jdbc.queryForMap("select * from TSS_BCOMP_TASK_NEW");
         assertThat(row.get("TASK_STATE")).isEqualTo("1");
         assertThat(row.get("TASK_RESULT")).isNull();
         assertThat(row.get("CREATE_DATETIME").toString()).hasSize(14);
@@ -57,20 +57,20 @@ class TaskManagementApiTest {
 
     @Test
     void rejectsTaskWhenEitherCompatibleConnectionHasNoCurrentSchema() throws Exception {
-        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:postgresql://old/core',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=1");
-        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:postgresql://new/core?currentSchema=business',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=2");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_URL='jdbc:postgresql://old/core',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_URL='jdbc:postgresql://new/core?currentSchema=business',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=2");
 
         mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("CURRENT_SCHEMA_REQUIRED"));
 
-        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_TASK", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_TASK_NEW", Integer.class)).isZero();
     }
 
     @Test
     void createsTaskWhenBothCompatibleConnectionsSpecifyCurrentSchema() throws Exception {
-        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:postgresql://old/core?ssl=true&currentSchema=business',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=1");
-        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:opengauss://new/core?CURRENTSCHEMA=business',DATABASE_DRIVER='org.opengauss.Driver' where DATABASE_ID=2");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_URL='jdbc:postgresql://old/core?ssl=true&currentSchema=business',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_URL='jdbc:opengauss://new/core?CURRENTSCHEMA=business',DATABASE_DRIVER='org.opengauss.Driver' where DATABASE_ID=2");
 
         mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
             .andExpect(status().isCreated());
@@ -78,8 +78,8 @@ class TaskManagementApiTest {
 
     @Test
     void createsTaskForOracleAndMysqlConnectionsWithoutCurrentSchema() throws Exception {
-        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:oracle:thin:@old:1521/core',DATABASE_DRIVER='oracle.jdbc.OracleDriver' where DATABASE_ID=1");
-        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:mysql://new/core',DATABASE_DRIVER='com.mysql.cj.jdbc.Driver' where DATABASE_ID=2");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_URL='jdbc:oracle:thin:@old:1521/core',DATABASE_DRIVER='oracle.jdbc.OracleDriver' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_URL='jdbc:mysql://new/core',DATABASE_DRIVER='com.mysql.cj.jdbc.Driver' where DATABASE_ID=2");
 
         mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
             .andExpect(status().isCreated());
@@ -87,7 +87,7 @@ class TaskManagementApiTest {
 
     @Test
     void rejectsDuplicateThreePartIdentityEvenWithAnotherTimeNode() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','001','AM','1')");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','001','AM','1')");
         String request = """
             {"bcompIndex":22,"taskBusinessDate":"20260920","verifyBusinessDate":"20260919","taskBatch":"001","timeNode":"EOD"}
             """;
@@ -98,7 +98,7 @@ class TaskManagementApiTest {
 
     @Test
     void rejectsConfigurationWithoutBusinessKey() throws Exception {
-        jdbc.update("update TSS_BCOMP_FIELD set FIELD_INDEX_FLAG='0'");
+        jdbc.update("update TSS_BCOMP_FIELD_NEW set FIELD_INDEX_FLAG='0'");
         String request = """
             {"bcompIndex":22,"taskBusinessDate":"20260920","verifyBusinessDate":"20260919","taskBatch":"001","timeNode":"EOD"}
             """;
@@ -109,9 +109,9 @@ class TaskManagementApiTest {
 
     @Test
     void listsAndLooksUpExactTaskAndPagesDifferences() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,CREATE_DATETIME,TASK_STATE,TASK_RESULT,FILE1_ACOUNT,FILE2_ACOUNT) values(22,'20260920','001','EOD','20260920160000','3','1',3,3)");
-        jdbc.update("insert into TSS_BCOMP_DTL values(22,'20260920','001','[A]','A|+|old','A|+|new','4','VAL')");
-        jdbc.update("insert into TSS_BCOMP_DTL values(22,'20260920','001','[B]','', 'B|+|new','2','')");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,CREATE_DATETIME,TASK_STATE,TASK_RESULT,FILE1_ACOUNT,FILE2_ACOUNT) values(22,'20260920','001','EOD','20260920160000','3','1',3,3)");
+        jdbc.update("insert into TSS_BCOMP_DTL_NEW values(22,'20260920','001','[A]','A|+|old','A|+|new','4','VAL')");
+        jdbc.update("insert into TSS_BCOMP_DTL_NEW values(22,'20260920','001','[B]','', 'B|+|new','2','')");
 
         mvc.perform(get("/api/tasks").param("size", "20").param("sort", "createdAt,desc"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
@@ -127,13 +127,13 @@ class TaskManagementApiTest {
     void rejectsOversizedPageAndSortInjection() throws Exception {
         mvc.perform(get("/api/tasks").param("size", "101"))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_PAGE"));
-        mvc.perform(get("/api/tasks").param("sort", "TASK_STATE;drop table TSS_BCOMP_TASK"))
+        mvc.perform(get("/api/tasks").param("sort", "TASK_STATE;drop table TSS_BCOMP_TASK_NEW"))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_SORT"));
     }
 
     @Test
     void dashboardUsesBoundedRecentTaskQuery() throws Exception {
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,CREATE_DATETIME,TASK_STATE) values(22,'20260920','001','EOD','20260920160000','2')");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,CREATE_DATETIME,TASK_STATE) values(22,'20260920','001','EOD','20260920160000','2')");
         mvc.perform(get("/api/dashboard"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.runningCount").value(1))

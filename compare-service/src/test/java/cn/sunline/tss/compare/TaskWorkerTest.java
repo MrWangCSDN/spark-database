@@ -19,17 +19,17 @@ class TaskWorkerTest {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(ds);
         jdbc = new JdbcTemplate(ds); repository = new LegacyRepository(ds, 30); configs = new ConfigStore(repository);
-        jdbc.update("insert into TSS_BCOMP_CONF(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE) values(2,'table','2')");
-        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG(DATABASE_ID,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY) values(1,'jdbc:source','sa','','D','0',null)");
-        jdbc.update("insert into TSS_BCOMP_TABLE_SQL values(2,1,1,'T','T')");
-        jdbc.update("insert into TSS_BCOMP_FIELD(BCOMP_INDEX,FIELD_NAME) values(2,'ID')");
+        jdbc.update("insert into TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE) values(2,'table','2')");
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION,DATABASE_GENERATERKEY) values(1,'jdbc:source','sa','','D','0',null)");
+        jdbc.update("insert into TSS_BCOMP_TABLE_SQL_NEW values(2,1,1,'T','T')");
+        jdbc.update("insert into TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME) values(2,'ID')");
         env = new MockEnvironment().withProperty("tssveritask.executor.thread.enable", "false")
             .withProperty("spark.datasource.url", "jdbc:meta").withProperty("spark.datasource.username", "sa")
             .withProperty("spark.datasource.password", "").withProperty("spark.datasource.driver-class-name", "D")
             .withProperty("compare.refresh-timeout-seconds", "1");
     }
     void addTask(String batch) {
-        jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(2,'20260920',?,'A','1')", batch);
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(2,'20260920',?,'A','1')", batch);
     }
     void start(JobLauncher launcher) {
         worker = new TaskWorker(repository, configs, new JobArguments(env), launcher, env); worker.start();
@@ -37,46 +37,46 @@ class TaskWorkerTest {
     @AfterEach void cleanup() { if(worker != null) worker.stop(); }
     @Test void failedSubmissionIsRecordedWithoutKillingWorker() {
         addTask("1"); start(args -> { throw new IllegalStateException("sensitive detail"); }); worker.runOne();
-        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK", String.class)).isEqualTo("4");
-        assertThat(jdbc.queryForObject("select FTASK_REASON from TSS_BCOMP_TASK", String.class)).doesNotContain("sensitive detail");
+        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
+        assertThat(jdbc.queryForObject("select FTASK_REASON from TSS_BCOMP_TASK_NEW", String.class)).doesNotContain("sensitive detail");
         assertThat(worker.status()).isEqualTo("2");
     }
     @Test void finishedProcessWithoutPersistedResultMustNotBecomeSuccess() {
         addTask("1"); start(args -> {}); worker.runOne();
-        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK", String.class)).isEqualTo("4");
+        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
     }
     @Test void successfulJobKeepsLegacyDifferenceResult() {
-        addTask("1"); start(args -> jdbc.update("update TSS_BCOMP_TASK set TASK_STATE='3',TASK_RESULT='1',FILE1_ACOUNT=3,FILE2_ACOUNT=3"));
+        addTask("1"); start(args -> jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='3',TASK_RESULT='1',FILE1_ACOUNT=3,FILE2_ACOUNT=3"));
         worker.runOne();
-        assertThat(jdbc.queryForObject("select TASK_RESULT from TSS_BCOMP_TASK", String.class)).isEqualTo("1");
-        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK", String.class)).isEqualTo("3");
+        assertThat(jdbc.queryForObject("select TASK_RESULT from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("1");
+        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("3");
     }
     @Test void incompleteCompletedRowMustBeMarkedFailed() {
-        addTask("1"); start(args -> jdbc.update("update TSS_BCOMP_TASK set TASK_STATE='3',TASK_RESULT='2'"));
+        addTask("1"); start(args -> jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='3',TASK_RESULT='2'"));
         worker.runOne();
-        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK", String.class)).isEqualTo("4");
+        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
     }
     @Test void failedRefreshKeepsPreviousSnapshotAndPollingAlive() {
         start(args -> {});
-        jdbc.execute("drop table TSS_BCOMP_DATABASE_CONFIG");
+        jdbc.execute("drop table TSS_BCOMP_DATABASE_CONFIG_NEW");
         assertThat(worker.refresh().code()).isEqualTo(500);
         assertThat(configs.snapshot().names().get(2L)).isEqualTo("table");
         assertThat(worker.isRunning()).isTrue();
     }
     @Test void refreshWaitsForJobAndWorkerRemainsUsable() throws Exception {
         addTask("1"); var started = new CountDownLatch(1); var finish = new CountDownLatch(1);
-        start(args -> { started.countDown(); finish.await(); jdbc.update("update TSS_BCOMP_TASK set TASK_STATE='3',TASK_RESULT='2',FILE1_ACOUNT=1,FILE2_ACOUNT=1 where TASK_BATCH=?",args[8]); });
+        start(args -> { started.countDown(); finish.await(); jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='3',TASK_RESULT='2',FILE1_ACOUNT=1,FILE2_ACOUNT=1 where TASK_BATCH=?",args[8]); });
         var pool=Executors.newFixedThreadPool(2);
         try {
             var job=pool.submit(worker::runOne); assertThat(started.await(3,TimeUnit.SECONDS)).isTrue();
-            jdbc.update("update TSS_BCOMP_CONF set BCOMP_NAME='refreshed'");
+            jdbc.update("update TSS_BCOMP_CONF_NEW set BCOMP_NAME='refreshed'");
             var refresh=pool.submit(worker::refresh);
             assertThatThrownBy(() -> refresh.get(100,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
             finish.countDown(); job.get(3,TimeUnit.SECONDS);
             assertThat(refresh.get(3,TimeUnit.SECONDS).code()).isEqualTo(200);
             assertThat(configs.snapshot().names().get(2L)).isEqualTo("refreshed");
             addTask("2"); worker.runOne();
-            assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK",String.class)).containsOnly("3");
+            assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK_NEW",String.class)).containsOnly("3");
         } finally { finish.countDown(); pool.shutdownNow(); }
     }
     @Test void originalHttpContractsRemainAvailable() throws Exception {
@@ -92,7 +92,7 @@ class TaskWorkerTest {
         var pool=Executors.newSingleThreadExecutor();
         try {
             var job=pool.submit(worker::runOne); assertThat(started.await(3,TimeUnit.SECONDS)).isTrue();
-            jdbc.update("update TSS_BCOMP_CONF set BCOMP_NAME='changed'");
+            jdbc.update("update TSS_BCOMP_CONF_NEW set BCOMP_NAME='changed'");
             assertThat(worker.refresh()).isEqualTo(new TaskWorker.RefreshResult(500,"等待任务超时"));
             assertThat(configs.snapshot().names().get(2L)).isEqualTo("table");
             finish.countDown(); job.get(3,TimeUnit.SECONDS);
@@ -108,6 +108,6 @@ class TaskWorkerTest {
         assertThat(started.await(3,TimeUnit.SECONDS)).isTrue();
         worker.stop();
         assertThat(worker.status()).isEqualTo("0");
-        assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK",String.class)).containsExactlyInAnyOrder("4","1");
+        assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK_NEW",String.class)).containsExactlyInAnyOrder("4","1");
     }
 }
