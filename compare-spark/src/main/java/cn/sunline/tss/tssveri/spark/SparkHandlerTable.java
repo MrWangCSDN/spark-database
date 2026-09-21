@@ -175,7 +175,6 @@ public class SparkHandlerTable {
             List<Row> tssBcompFieldDataRows = getTssBcompFieldData(sc,args);
 
             //从field配置中获取分区列名，从config表获取分区数与分片策略
-            String partitionColumn = getPartitionColumn(tssBcompFieldDataRows);
             int defaultParallelism = sc.sparkContext().defaultParallelism();
             ShardConf shardConf = readShardConf(args, defaultParallelism);
 
@@ -187,8 +186,8 @@ public class SparkHandlerTable {
                 log.info("SQL占位符替换完成，核对日期: {}", sqlDateParam);
             }
 
-            //解析新老两侧的读取计划（RANGE分区/NTILE谓词/普通读取，含降级原因）
-            ReadPlan readPlan = resolveReadPlan(args, partitionColumn, shardConf);
+            //解析新老两侧的读取计划（HASH/RANGE/NTILE/普通读取，含legacy降级原因）
+            ReadPlan readPlan = resolveReadPlan(args, tssBcompFieldDataRows, shardConf);
             //回写实际读取策略到TSS_BCOMP_TASK.BCOMP_READ_MODE，运维可见降级事实（列不存在时只告警）
             writeReadMode(connectionOut, readPlan, args);
 
@@ -690,48 +689,61 @@ public class SparkHandlerTable {
      * @param defaultParallelism 集群默认并行度，用于分区数自适应
      * @return ShardConf 分片配置
      */
-    private static ShardConf readShardConf(String[] args, int defaultParallelism) {
-        int configuredNum = 0;
+    static ShardConf readShardConf(String[] args, int defaultParallelism) {
+        Object configuredNum = null;
         String strategy = SHARD_RANGE;
-        Connection conn = null;
+        boolean strategyRead = false;
         try {
             Class.forName(args[tssDataSourceDriver]);
-            conn = DriverManager.getConnection(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword]);
-            // 1. 分区数
-            try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF WHERE BCOMP_INDEX = ?")) {
-                ps.setString(1, args[bcompIndex]);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        int num = rs.getInt(1);
-                        if (!rs.wasNull() && num > 0) {
-                            configuredNum = num;
+            try (Connection conn = DriverManager.getConnection(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword])) {
+                // Read strategy first: once HASH is known, neither invalid counts nor query failures may fall back.
+                try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_SHARD_STRATEGY FROM TSS_BCOMP_CONF WHERE BCOMP_INDEX = ?")) {
+                    ps.setString(1, args[bcompIndex]);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            String value = rs.getString(1);
+                            if (value != null && !value.trim().isEmpty()) strategy = value.trim().toUpperCase(Locale.ROOT);
                         }
                     }
+                } catch (SQLException e) {
+                    if (!isMissingShardStrategyColumn(e)) throw e;
+                    log.info("TSS_BCOMP_CONF缺少BCOMP_SHARD_STRATEGY，使用legacy RANGE: {}", e.getMessage());
                 }
-            }
-            // 2. 分片策略（列可能不存在，单独try-catch，缺失即降级RANGE）
-            try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_SHARD_STRATEGY FROM TSS_BCOMP_CONF WHERE BCOMP_INDEX = ?")) {
-                ps.setString(1, args[bcompIndex]);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        String s = rs.getString(1);
-                        if (s != null && !s.trim().isEmpty()) {
-                            strategy = s.trim().toUpperCase();
-                        }
+                strategyRead = true;
+                try (PreparedStatement ps = conn.prepareStatement("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF WHERE BCOMP_INDEX = ?")) {
+                    ps.setString(1, args[bcompIndex]);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) configuredNum = "HASH".equals(strategy) ? rs.getObject(1) : rs.getInt(1);
                     }
                 }
-            } catch (SQLException e) {
-                log.info("TSS_BCOMP_CONF.BCOMP_SHARD_STRATEGY 不可用（DDL未执行?），分片策略降级为RANGE: {}", e.getMessage());
-                strategy = SHARD_RANGE;
             }
         } catch (Exception e) {
-            log.warn("读取分片配置失败，使用默认(分区数自适应, 策略RANGE): {}", e.getMessage());
-        } finally {
-            try { if (conn != null) conn.close(); } catch (SQLException ignored) {}
+            if (!strategyRead || "HASH".equals(strategy)) throw new IllegalArgumentException("分片策略或HASH配置读取失败", e);
+            log.warn("读取分片配置失败，使用默认分区数: {}", e.getMessage());
         }
-        int partitionNum = resolvePartitionNum(configuredNum, defaultParallelism);
+        if (!SHARD_RANGE.equals(strategy) && !SHARD_NTILE.equals(strategy) && !"HASH".equals(strategy))
+            throw new IllegalArgumentException("不支持的分片策略: " + strategy);
+        int partitionNum;
+        if ("HASH".equals(strategy)) {
+            partitionNum = PrimaryKeyHashPlanner.partitionCount(configuredNum);
+        } else {
+            int legacyNum = 0;
+            try { if (configuredNum != null) legacyNum = new BigDecimal(configuredNum.toString()).intValue(); }
+            catch (NumberFormatException ignored) { }
+            partitionNum = resolvePartitionNum(legacyNum, defaultParallelism);
+        }
         log.info("分片配置: 策略={}, 分区数={}（配置值={}, 集群并行度={}）", strategy, partitionNum, configuredNum, defaultParallelism);
         return new ShardConf(partitionNum, strategy);
+    }
+
+    /** Only a vendor-reported missing strategy column identifies the supported pre-migration schema. */
+    private static boolean isMissingShardStrategyColumn(SQLException error) {
+        String state = error.getSQLState();
+        boolean missingColumn = "42703".equals(state) || "42S22".equals(state)
+                || error.getErrorCode() == 904 || error.getErrorCode() == 42122;
+        // H2 appends the entire SQL on later lines: do not mistake a missing BCOMP_INDEX for this column.
+        String detail = Objects.toString(error.getMessage(), "").split("\n", 2)[0].toUpperCase(Locale.ROOT);
+        return missingColumn && detail.contains("BCOMP_SHARD_STRATEGY");
     }
 
     /**
@@ -761,9 +773,21 @@ public class SparkHandlerTable {
     }
 
     /**
-     * 解析新老两侧的读取计划。任一侧降级只影响该侧，不使核对任务失败。
+     * 解析新老两侧的读取计划。HASH必须成功构建；legacy策略保留按侧降级行为。
      */
-    private static ReadPlan resolveReadPlan(String[] args, String partitionColumn, ShardConf conf) {
+    static ReadPlan resolveReadPlan(String[] args, List<Row> fields, ShardConf conf) throws Exception {
+        if ("HASH".equalsIgnoreCase(conf.strategy)) {
+            PrimaryKeyHashPlanner.partitionCount(conf.partitionNum);
+            // This branch is deliberately outside legacy fallback catches and does not read FIELD_PARTITION_FLAG.
+            List<Integer> oldKeys = PrimaryKeyHashPlanner.keyPositions(fields, FIELD_OLD_INDEX);
+            List<Integer> newKeys = PrimaryKeyHashPlanner.keyPositions(fields, FIELD_NEW_INDEX);
+            SidePlan oldSide = hashSidePlan("老系统", args[OLD_URL_INDEX], args[OLD_USER_INDEX],
+                    args[OLD_PASSWORD_INDEX], args[OLD_DRIVER_INDEX], args[OLD_TABLE_INDEX], oldKeys, conf.partitionNum);
+            SidePlan newSide = hashSidePlan("新系统", args[NEW_URL_INDEX], args[NEW_USER_INDEX],
+                    args[NEW_PASSWORD_INDEX], args[NEW_DRIVER_INDEX], args[NEW_TABLE_INDEX], newKeys, conf.partitionNum);
+            return new ReadPlan(oldSide, newSide);
+        }
+        String partitionColumn = getPartitionColumn(fields);
         SidePlan oldSide = resolveSidePlan("老系统",
                 args[OLD_URL_INDEX], args[OLD_USER_INDEX], args[OLD_PASSWORD_INDEX],
                 args[OLD_DRIVER_INDEX], args[OLD_TABLE_INDEX], partitionColumn, conf);
@@ -771,6 +795,19 @@ public class SparkHandlerTable {
                 args[NEW_URL_INDEX], args[NEW_USER_INDEX], args[NEW_PASSWORD_INDEX],
                 args[NEW_DRIVER_INDEX], args[NEW_TABLE_INDEX], partitionColumn, conf);
         return new ReadPlan(oldSide, newSide);
+    }
+
+    private static SidePlan hashSidePlan(String side, String url, String user, String password,
+                                         String driver, String source, List<Integer> keys, int count) throws Exception {
+        Class.forName(driver);
+        String[] predicates;
+        try (Connection connection = DriverManager.getConnection(url, user, password)) {
+            predicates = PrimaryKeyHashPlanner.predicates(connection, source, keys, count);
+        }
+        String mode = "HASH主键读取(" + count + "分区)";
+        log.info("{}表使用{}", side, mode);
+        if (predicates == null) return SidePlan.ofOptions(side, mode, buildJdbcConfig(url, user, password, driver, source));
+        return SidePlan.ofPredicates(side, mode, url, source, buildConnProps(user, password, driver), predicates);
     }
 
     /**
@@ -865,16 +902,19 @@ public class SparkHandlerTable {
         props.setProperty("password", password);
         props.setProperty("driver", driver);
         props.setProperty("fetchsize", "1000");
-        //同buildJdbcConfig：OceanBase驱动需服务端游标才按fetchSize流式拉取，否则executeQuery全量进堆
-        if (isOceanBaseDriver(driver)) {
+        props.setProperty("connectTimeout", "60000");
+        props.setProperty("socketTimeout", "300000");
+        // MySQL Connector/J and OceanBase need cursor fetching for a positive fetch size to stream rows.
+        if (requiresCursorFetch(driver)) {
             props.setProperty("useCursorFetch", "true");
         }
         return props;
     }
 
-    /** OceanBase JDBC驱动(MariaDB协议系)默认全量fetch结果集进客户端堆，需useCursorFetch开启服务端游标流式拉取。 */
-    private static boolean isOceanBaseDriver(String driver) {
-        return driver != null && driver.toLowerCase().contains("oceanbase");
+    /** Positive fetch size requires server-side cursors for MySQL Connector/J and OceanBase. */
+    private static boolean requiresCursorFetch(String driver) {
+        String name = Objects.toString(driver, "").toLowerCase(Locale.ROOT);
+        return name.contains("oceanbase") || name.equals("com.mysql.cj.jdbc.driver") || name.equals("com.mysql.jdbc.driver");
     }
 
     /**
@@ -897,7 +937,7 @@ public class SparkHandlerTable {
         }
     }
 
-    /** 分片配置：分区数 + 策略（RANGE/NTILE）。 */
+    /** 分片配置：分区数 + 策略（RANGE/NTILE/HASH）。 */
     static class ShardConf {
         final int partitionNum;
         final String strategy;
@@ -915,7 +955,7 @@ public class SparkHandlerTable {
         boolean ascending;
     }
 
-    /** 单侧读取计划：options 路径（普通/RANGE）或 predicates 路径（NTILE）二选一。 */
+    /** 单侧读取计划：options 路径（普通/RANGE）或 predicates 路径（NTILE/HASH）二选一。 */
     static class SidePlan {
         final String sideDesc;
         final String modeDesc;
@@ -1128,9 +1168,9 @@ public class SparkHandlerTable {
         config.put("dbtable", dbTable);
         // 控制JDBC每次从数据库拉取的行数，降低驱动内部缓冲压力（OceanBase驱动对大包容易OOM）
         config.put("fetchSize", "1000");
-        // OceanBase驱动默认在executeQuery时就把整个结果集fetchAllResults进客户端堆(fetchSize被忽略)，
+        // MySQL/OceanBase驱动默认可能在executeQuery时把整个结果集装入客户端堆(fetchSize被忽略)，
         // 单分区几十万行即撑爆executor堆；useCursorFetch=true启用服务端游标后fetchSize才生效，按批流式拉取
-        if (isOceanBaseDriver(driver)) {
+        if (requiresCursorFetch(driver)) {
             config.put("useCursorFetch", "true");
         }
         // JDBC连接超时配置，防止连接挂起

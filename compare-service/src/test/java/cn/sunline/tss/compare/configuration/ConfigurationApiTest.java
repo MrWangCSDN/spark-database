@@ -80,6 +80,72 @@ class ConfigurationApiTest {
         return new MockMultipartFile("file","axon.sql","application/sql",script.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    String hashScript(String count, String strategy) {
+        return axonScript("HASH_TABLE")
+            .replace("bcomp_time_node,bcomp_state)", "bcomp_time_node,bcomp_state,bcomp_partition_num,bcomp_shard_strategy)")
+            .replace("'配置''说明','2','1','3','1');", "'配置''说明','2','1','3','1',"+count+","+strategy+");");
+    }
+
+    @Test void importsHashPartitionCountWithoutPartitionField() throws Exception {
+        for (int count : new int[]{1,16,256}) {
+            mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(hashScript(""+count,"'HASH'"))))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF where BCOMP_INDEX=1",Integer.class)).isEqualTo(count);
+            assertThat(jdbc.queryForObject("select BCOMP_SHARD_STRATEGY from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("HASH");
+            assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD where FIELD_PARTITION_FLAG='1'",Integer.class)).isZero();
+        }
+    }
+
+    @Test void importsTheActualAxonPrimaryKeyHashExportContract() throws Exception {
+        byte[] script = new ClassPathResource("axon-primary-key-hash-config.sql")
+            .getInputStream().readAllBytes();
+        var file = new MockMultipartFile("file", "axon-primary-key-hash-config.sql", "application/sql", script);
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(file))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.configurationCount").value(1))
+            .andExpect(jsonPath("$.fieldCount").value(3));
+        assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF where BCOMP_INDEX=1", Integer.class)).isEqualTo(16);
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD where BCOMP_INDEX=1 and FIELD_INDEX_FLAG='1'", Integer.class)).isEqualTo(2);
+    }
+
+    @Test void invalidHashParametersRollBackReplacementAndDoNotRefresh() throws Exception {
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
+            .andExpect(status().isCreated());
+        AtomicInteger reloads=new AtomicInteger();
+        for (String count : new String[]{"0","-1","257","1.5","NULL","'16'","999999999999999999999"}) {
+            mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import").file(scriptFile(hashScript(count,"'HASH'"))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        }
+        mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import").file(scriptFile(hashScript("16","'RANGE'"))))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        assertThat(reloads).hasValue(0);
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF",Integer.class)).isEqualTo(1);
+    }
+
+    @Test void hashScriptWithNoBusinessKeyIsRejectedAndRolledBack() throws Exception {
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(
+            hashScript("16","'HASH'").replace("'主键', '1','1','1','0'", "'主键', '1','1','0','0'"))))
+            .andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF",Integer.class)).isZero();
+    }
+
+    @Test void legacyScriptStillImportsWhenOptionalStrategyColumnDoesNotExist() throws Exception {
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF DROP COLUMN BCOMP_SHARD_STRATEGY");
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(axonScript("LEGACY"))))
+            .andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("LEGACY");
+    }
+
+    @Test void newScriptOnAnUnmigratedDatabaseDoesNotEraseExistingConfiguration() throws Exception {
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF DROP COLUMN BCOMP_SHARD_STRATEGY");
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(axonScript("LEGACY"))))
+            .andExpect(status().isOk());
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(hashScript("16","'HASH'"))))
+            .andExpect(status().isUnprocessableEntity());
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF where BCOMP_INDEX=1",String.class)).isEqualTo("LEGACY");
+    }
+
     @Test void importsAxonScriptAsOneTransactionAndRefreshesCache() throws Exception {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"旧配置")))
             .andExpect(status().isCreated());

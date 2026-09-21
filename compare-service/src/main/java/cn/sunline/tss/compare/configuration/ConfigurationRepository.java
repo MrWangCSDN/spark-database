@@ -57,7 +57,11 @@ public class ConfigurationRepository {
                     throw cn.sunline.tss.compare.api.ApiException.badRequest("INVALID_CONFIG_SCRIPT","配置脚本三表数据数量不一致");
                 Integer missingDatabases=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL s LEFT JOIN TSS_BCOMP_DATABASE_CONFIG o ON o.DATABASE_ID=s.ORIG_DATABASE_ID LEFT JOIN TSS_BCOMP_DATABASE_CONFIG d ON d.DATABASE_ID=s.DEST_DATABASE_ID WHERE o.DATABASE_ID IS NULL OR d.DATABASE_ID IS NULL",Integer.class);
                 if(missingDatabases!=null&&missingDatabases>0)throw cn.sunline.tss.compare.api.ApiException.badRequest("INVALID_CONFIG_SCRIPT","配置脚本引用的数据库连接不存在");
-                return new AxonConfigScriptParser.ParseResult(configurations,fields,sqls);
+                if(parsed.hasHashConfigurations()) {
+                    Integer missingKeys=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF c WHERE UPPER(c.BCOMP_SHARD_STRATEGY)='HASH' AND NOT EXISTS (SELECT 1 FROM TSS_BCOMP_FIELD f WHERE f.BCOMP_INDEX=c.BCOMP_INDEX AND f.FIELD_INDEX_FLAG='1')",Integer.class);
+                    if(missingKeys!=null&&missingKeys>0)throw cn.sunline.tss.compare.api.ApiException.badRequest("INVALID_CONFIG_SCRIPT","主键哈希分区必须配置业务键字段");
+                }
+                return parsed;
             });
         } catch(cn.sunline.tss.compare.api.ApiException exception){throw exception;}
         catch(DataAccessException exception){throw cn.sunline.tss.compare.api.ApiException.unprocessable("CONFIG_SCRIPT_EXECUTION_FAILED","配置脚本执行失败，请检查脚本与数据库约束",exception);}

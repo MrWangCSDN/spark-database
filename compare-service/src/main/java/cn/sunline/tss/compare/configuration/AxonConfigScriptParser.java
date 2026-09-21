@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 final class AxonConfigScriptParser {
     private static final Pattern INSERT = Pattern.compile("(?is)^INSERT\\s+INTO\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*VALUES\\s*(.+)$");
     private static final List<String> CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state");
+    private static final List<String> HASH_CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state","bcomp_partition_num","bcomp_shard_strategy");
     private static final List<String> FIELD_COLUMNS = List.of("bcomp_index","field_name","field_type","field_memo","field_old_index","field_new_index","field_index_flag","field_enum_flag");
     private static final List<String> SQL_COLUMNS = List.of("bcomp_index","orig_sql","orig_database_id","dest_sql","dest_database_id");
 
@@ -77,7 +78,7 @@ final class AxonConfigScriptParser {
             throw ApiException.badRequest("CONFIG_SCRIPT_READ_FAILED", "配置脚本读取失败");
         }
         if (!state.committed) invalid();
-        return new ParseResult(state.confRows, state.fieldRows, state.sqlRows);
+        return new ParseResult(state.confRows, state.fieldRows, state.sqlRows, state.hasHashConfigurations);
     }
 
     private void accept(String raw, State state, Consumer<Command> executor) {
@@ -100,21 +101,23 @@ final class AxonConfigScriptParser {
         List<String> columns = Pattern.compile("\\s*,\\s*").splitAsStream(matcher.group(2).trim()).map(value -> value.toLowerCase(Locale.ROOT)).toList();
         List<String> expected;
         int phase;
-        if (table.equals("tss_bcomp_conf")) { expected=CONF_COLUMNS; phase=0; }
+        boolean hashConfiguration = table.equals("tss_bcomp_conf") && columns.equals(HASH_CONF_COLUMNS);
+        if (table.equals("tss_bcomp_conf")) { expected=hashConfiguration ? HASH_CONF_COLUMNS : CONF_COLUMNS; phase=0; }
         else if (table.equals("tss_bcomp_field")) { expected=FIELD_COLUMNS; phase=1; }
         else if (table.equals("tss_bcomp_table_sql")) { expected=SQL_COLUMNS; phase=2; }
         else { invalid(); return; }
         if (!columns.equals(expected) || phase < state.phase || phase > state.phase + 1) invalid();
         if (phase > state.phase && (state.phase == 0 ? state.confRows : state.fieldRows) == 0) invalid();
         state.phase = phase;
-        int rows = countLiteralRows(matcher.group(3), expected.size());
+        int rows = countLiteralRows(matcher.group(3), expected.size(), hashConfiguration);
+        state.hasHashConfigurations |= hashConfiguration;
         if (phase == 0) state.confRows += rows;
         else if (phase == 1) state.fieldRows += rows;
         else state.sqlRows += rows;
         executor.accept(Command.insert(statement));
     }
 
-    private int countLiteralRows(String values, int columnCount) {
+    private int countLiteralRows(String values, int columnCount, boolean hashConfiguration) {
         int position=0, rows=0;
         while (true) {
             position=skip(values,position);
@@ -124,6 +127,7 @@ final class AxonConfigScriptParser {
             while (true) {
                 position=skip(values,position);
                 if (position>=values.length()) invalid();
+                int tokenStart = position;
                 char c=values.charAt(position);
                 if (c=='\'') position=stringLiteral(values,position);
                 else {
@@ -132,6 +136,8 @@ final class AxonConfigScriptParser {
                     while(position<values.length() && Character.isDigit(values.charAt(position))) position++;
                     if(position==start || (c=='-' && position==start+1)) invalid();
                 }
+                if (hashConfiguration && columns == 8) validatePartitionCount(values.substring(tokenStart, position));
+                if (hashConfiguration && columns == 9 && !"'HASH'".equalsIgnoreCase(values.substring(tokenStart, position))) invalid();
                 columns++;
                 position=skip(values,position);
                 if(position>=values.length()) invalid();
@@ -144,6 +150,15 @@ final class AxonConfigScriptParser {
             position=skip(values,position);
             if(position>=values.length()) return rows;
             if(values.charAt(position++)!=',') invalid();
+        }
+    }
+
+    private void validatePartitionCount(String token) {
+        try {
+            int count = Integer.parseInt(token);
+            if (count < 1 || count > 256) invalid();
+        } catch (NumberFormatException exception) {
+            invalid();
         }
     }
 
@@ -168,6 +183,6 @@ final class AxonConfigScriptParser {
         static Command insert(String sql){return new Command(Kind.INSERT,sql);}
     }
     enum Kind { CLEAR, INSERT }
-    record ParseResult(long configurationCount,long fieldCount,long tableSqlCount) {}
-    private static final class State { int step; int phase; long confRows; long fieldRows; long sqlRows; boolean committed; }
+    record ParseResult(long configurationCount,long fieldCount,long tableSqlCount,boolean hasHashConfigurations) {}
+    private static final class State { int step; int phase; long confRows; long fieldRows; long sqlRows; boolean committed; boolean hasHashConfigurations; }
 }
