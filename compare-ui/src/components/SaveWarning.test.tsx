@@ -13,3 +13,13 @@ test('retries the server cache refresh without discarding the saved configuratio
   expect(calls).toBe(1)
   expect(await screen.findByText('缓存已刷新')).toBeVisible()
 })
+
+test('uses database-specific saved and refreshed copy when supplied', async () => {
+  server.use(http.post('/api/cache/refresh', () => HttpResponse.json({ code: 200, msg: '刷新成功' })))
+  const user = userEvent.setup()
+  render(<SaveWarning message="连接已保存，但缓存刷新失败" savedTitle="连接已保存" successMessage="新连接已加载到当前服务实例。" />)
+
+  expect(screen.getByText('连接已保存')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: '重试刷新缓存' }))
+  expect(await screen.findByText('新连接已加载到当前服务实例。')).toBeVisible()
+})

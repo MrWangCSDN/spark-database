@@ -18,6 +18,9 @@ export const handlers = [
   http.get('/api/configurations/8', () => HttpResponse.json({ basic: { bcompIndex: 8, name: '客户余额核对', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 8, dateMode: '1' }, tableSql: { origDatabaseId: 1, destDatabaseId: 2, origSql: 'select * from old_customer', destSql: 'select * from new_customer' }, fields: [{ name: 'CUSTOMER_ID', type: '1', memo: '', oldIndex: 1, newIndex: 1, indexFlag: '1', enumFlag: '0', enumIndex: null, partitionFlag: '0', ignoreValue: null, ignoreFlag: '0' }] })),
   http.get('/api/configuration-options', () => HttpResponse.json({ states: ['1'], enums: [], ignoreValues: [] })),
   http.get('/api/databases', () => HttpResponse.json({ items: [{ databaseId: 1, databaseName: '核心旧库', url: 'jdbc:postgresql://old/core', user: 'reader', driver: 'org.postgresql.Driver', encryption: '1', passwordConfigured: true }], page: 0, size: 100, total: 1 })),
+  http.post('/api/databases/test', () => HttpResponse.json({ success: true, databaseProduct: 'GaussDB', databaseVersion: 'V500', elapsedMs: 25 })),
+  http.post('/api/databases/:id/test', () => HttpResponse.json({ success: true, databaseProduct: 'GaussDB', databaseVersion: 'V500', elapsedMs: 25 })),
+  http.post('/api/cache/refresh', () => HttpResponse.json({ code: 200, msg: '刷新成功' })),
   http.put('/api/configurations/8', async () => HttpResponse.json({ configuration: {}, saved: true, cacheRefreshed: false, warning: '配置已保存，但缓存刷新失败' })),
   http.put('/api/databases/1', async ({ request }) => HttpResponse.json({ ...(await request.json() as object), passwordConfigured: true }))
 ]
