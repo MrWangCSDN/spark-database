@@ -232,7 +232,7 @@ public class SparkHandlerTable {
                 finalPs1 = connectionInner.prepareStatement("insert into TSS_BCOMP_DTL_NEW(bcomp_index,task_date,task_batch," +
                         "comp_index_str,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON) " +
                         "values (?,?,?,?,?,?,?,?)");
-                finalPs5 = connectionInner.prepareStatement("SELECT * FROM TSS_BCOMP_DIFFFIELD WHERE bcomp_index = ?");
+                finalPs5 = connectionInner.prepareStatement("SELECT * FROM TSS_BCOMP_DIFFFIELD_NEW WHERE bcomp_index = ?");
                 finalPs5.setString(1,args[bcompIndex]);
 
                 int count = 0;
@@ -416,7 +416,7 @@ public class SparkHandlerTable {
             return map;
         }
         try (PreparedStatement ps = conn.prepareStatement(
-                "select CONV_ENUM_INDEX, ORIG_ENUM_VALUE, DEST_ENUM_VALUE from tss_bcomp_enum where CONV_ENUM_INDEX in (" + enumIndexCsv + ")");
+                "select CONV_ENUM_INDEX, ORIG_ENUM_VALUE, DEST_ENUM_VALUE from tss_bcomp_enum_new where CONV_ENUM_INDEX in (" + enumIndexCsv + ")");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 //同一CONV_ENUM_INDEX下的多行映射必须合并，逐行new单对map会互相覆盖
@@ -438,7 +438,7 @@ public class SparkHandlerTable {
             return map;
         }
         try (PreparedStatement ps = conn.prepareStatement(
-                "select IGNORE_ID, IGNORE_VALUE from tss_ignore_value where IGNORE_ID in (" + ignoreIdCsv + ")");
+                "select IGNORE_ID, IGNORE_VALUE from tss_ignore_value_new where IGNORE_ID in (" + ignoreIdCsv + ")");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 map.computeIfAbsent(rs.getInt(1), k -> new HashSet<>()).add(rs.getString(2));

@@ -1,4 +1,4 @@
--- bd 六张独立业务表：首次执行，空表初始化，不迁移旧数据。
+-- bd 九张独立业务表：首次执行，空表初始化，不迁移旧数据。
 -- 执行前请设置 search_path，与服务及 Spark 元数据库配置一致。
 -- PostgreSQL / GaussDB-compatible metadata tables. Run in the metadata schema.
 -- Set search_path to the same schema used by service and Spark before execution.
@@ -85,4 +85,24 @@ CREATE INDEX idx_bcomp_task_new_state ON TSS_BCOMP_TASK_NEW (TASK_STATE,BCOMP_IN
 CREATE INDEX idx_bcomp_task_new_date ON TSS_BCOMP_TASK_NEW (TASK_BUSI_DATE,TASK_STATE);
 CREATE INDEX idx_bcomp_field_new_order ON TSS_BCOMP_FIELD_NEW (BCOMP_INDEX,FIELD_OLD_INDEX);
 CREATE INDEX idx_bcomp_dtl_new_task ON TSS_BCOMP_DTL_NEW (BCOMP_INDEX,TASK_DATE,TASK_BATCH);
+-- 三张规则表：首次创建空表，不复制旧数据。
+CREATE TABLE TSS_BCOMP_ENUM_NEW (
+    CONV_ENUM_INDEX BIGINT,
+    ORIG_ENUM_VALUE VARCHAR(200),
+    DEST_ENUM_VALUE VARCHAR(200)
+);
+CREATE INDEX idx_bcomp_enum_new_id ON TSS_BCOMP_ENUM_NEW (CONV_ENUM_INDEX);
+
+CREATE TABLE TSS_IGNORE_VALUE_NEW (
+    IGNORE_ID BIGINT,
+    IGNORE_VALUE VARCHAR(200)
+);
+CREATE INDEX idx_ignore_value_new_id ON TSS_IGNORE_VALUE_NEW (IGNORE_ID);
+
+-- 仅保留当前 Spark 预编译查询需要的字段；当前代码不执行该查询。
+CREATE TABLE TSS_BCOMP_DIFFFIELD_NEW (
+    BCOMP_INDEX BIGINT
+);
+CREATE INDEX idx_bcomp_difffield_new_id ON TSS_BCOMP_DIFFFIELD_NEW (BCOMP_INDEX);
+
 COMMIT;

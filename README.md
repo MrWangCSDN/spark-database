@@ -8,7 +8,7 @@
 
 ## 不变的兼容边界
 
-通过 `sql/create_bcomp_new.sql` 新建六张空业务表；旧表及数据保留。枚举、忽略值和差异字段依赖继续复用：
+通过 `sql/create_bcomp_new.sql` 新建九张空业务表；旧表及数据保留。枚举、忽略值和差异字段依赖同样使用独占新表：
 
 | 运行时表 | 用途 |
 |---|---|
@@ -16,10 +16,10 @@
 | TSS_BCOMP_DATABASE_CONFIG_NEW | 两侧连接信息及原AES密文/密钥 |
 | TSS_BCOMP_TABLE_SQL_NEW | 两侧SQL和数据库ID |
 | TSS_BCOMP_FIELD_NEW | 字段位置、类型、业务键、分区列、忽略规则 |
-| TSS_BCOMP_ENUM / TSS_IGNORE_VALUE | 枚举映射与忽略值 |
+| TSS_BCOMP_ENUM_NEW / TSS_IGNORE_VALUE_NEW | 枚举映射与忽略值 |
 | TSS_BCOMP_TASK_NEW | 原任务状态与统计 |
 | TSS_BCOMP_DTL_NEW | 原差异明细 |
-| TSS_BCOMP_DIFFFIELD | 原作业保留的预编译查询依赖 |
+| TSS_BCOMP_DIFFFIELD_NEW | 原作业保留的预编译查询依赖 |
 
 类型代码、从1开始的字段位置、`${HDRQ}`替换、`|+|`内容分隔符、重复键`#MD5`、明细结果代码全部保留。服务发送原来的21个位置参数。可选字段 `BCOMP_SHARD_STRATEGY`、`BCOMP_READ_MODE` 缺失时沿用原回退行为。
 
@@ -178,10 +178,12 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 没有真实GaussDB/Spark集群、现场配置和OOM日志，本地测试不能代替现场驱动兼容验证、全量性能压测。21参数为了兼容包含连接密码，虽然去除了主动打印，仍需限制操作系统进程信息和Spark作业详情的访问。
 
 
-## 六张业务表隔离部署
+## 九张业务表隔离部署
 
-执行 `sql/create_bcomp_new.sql` 创建六张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
+执行 `sql/create_bcomp_new.sql` 创建九张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
 
-停止 bd 并等待在途 Spark 作业结束后，同步替换 service 和 Spark 两个 JAR。在数据库连接页面重新维护连接（Axon 脚本使用 ID 1 和 2），从 Axon 选择“新版本（_new 表）”下载并导入配置，再创建小任务测试。旧版本 SQL 不可导入本版 bd。枚举、忽略值及差异字段表仍复用现有表。
+停止 bd 并等待在途 Spark 作业结束后，同步替换 service 和 Spark 两个 JAR。在数据库连接页面重新维护连接（Axon 脚本使用 ID 1 和 2），从 Axon 选择“新版本（_new 表）”下载并导入配置，再创建小任务测试。旧版本 SQL 不可导入本版 bd。枚举、忽略值及差异字段表均使用 `_NEW` 表；规则表初始为空，启用规则前需维护相应数据。
 
 回滚需同时恢复两个 JAR；新表数据不会自动复制回旧表。
+
+已执行前一版六表脚本的环境，只需补执行 `sql/add_bcomp_rule_tables_new.sql`；新环境执行完整九表脚本 `sql/create_bcomp_new.sql`。差异字段表仅保留当前代码查询依赖的 BCOMP_INDEX 列，不复制旧系统未使用的字段。

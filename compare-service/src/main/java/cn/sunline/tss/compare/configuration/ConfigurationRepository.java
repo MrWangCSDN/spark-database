@@ -81,8 +81,8 @@ public class ConfigurationRepository {
 
     ConfigurationOptions options(){
         List<String> states=jdbc.query("SELECT DISTINCT BCOMP_STATE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_STATE IS NOT NULL ORDER BY BCOMP_STATE",(rs,n)->rs.getString(1));
-        List<ConfigurationOptions.EnumOption> enums=jdbc.query("SELECT CONV_ENUM_INDEX,ORIG_ENUM_VALUE,DEST_ENUM_VALUE FROM TSS_BCOMP_ENUM ORDER BY CONV_ENUM_INDEX,ORIG_ENUM_VALUE",(rs,n)->new ConfigurationOptions.EnumOption(rs.getLong(1),rs.getString(2),rs.getString(3)));
-        List<ConfigurationOptions.IgnoreOption> ignores=jdbc.query("SELECT IGNORE_ID,IGNORE_VALUE FROM TSS_IGNORE_VALUE ORDER BY IGNORE_ID,IGNORE_VALUE",(rs,n)->new ConfigurationOptions.IgnoreOption(rs.getLong(1),rs.getString(2)));
+        List<ConfigurationOptions.EnumOption> enums=jdbc.query("SELECT CONV_ENUM_INDEX,ORIG_ENUM_VALUE,DEST_ENUM_VALUE FROM TSS_BCOMP_ENUM_NEW ORDER BY CONV_ENUM_INDEX,ORIG_ENUM_VALUE",(rs,n)->new ConfigurationOptions.EnumOption(rs.getLong(1),rs.getString(2),rs.getString(3)));
+        List<ConfigurationOptions.IgnoreOption> ignores=jdbc.query("SELECT IGNORE_ID,IGNORE_VALUE FROM TSS_IGNORE_VALUE_NEW ORDER BY IGNORE_ID,IGNORE_VALUE",(rs,n)->new ConfigurationOptions.IgnoreOption(rs.getLong(1),rs.getString(2)));
         return new ConfigurationOptions(states,enums,ignores);
     }
 }

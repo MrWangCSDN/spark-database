@@ -14,9 +14,10 @@ class NewSchemaTest {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         new ResourceDatabasePopulator(new FileSystemResource("../sql/create_bcomp_new.sql")).execute(ds);
         var jdbc = new JdbcTemplate(ds);
-        for (String name : new String[]{"CONF", "TASK", "DATABASE_CONFIG", "TABLE_SQL", "FIELD", "DTL"}) {
+        for (String name : new String[]{"CONF", "TASK", "DATABASE_CONFIG", "TABLE_SQL", "FIELD", "DTL", "ENUM", "DIFFFIELD"}) {
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_" + name + "_NEW", Long.class)).isZero();
         }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_IGNORE_VALUE_NEW", Long.class)).isZero();
         String wideSql = "x".repeat(12000);
         jdbc.update("INSERT INTO TSS_BCOMP_TABLE_SQL_NEW (BCOMP_INDEX,ORIG_SQL) VALUES (1,?)", wideSql);
         assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW", String.class)).isEqualTo(wideSql);

@@ -35,7 +35,7 @@ class SparkCompatibilityTest {
             s.execute("create table TSS_BCOMP_TASK_NEW(BCOMP_INDEX int, TASK_BUSI_DATE varchar(8), TASK_BATCH varchar(10), BCOMP_TIME_NODE varchar(10), TASK_STATE varchar(1), TASK_RESULT varchar(1), FTASK_REASON varchar(2000), FILE1_ACOUNT bigint,FILE2_ACOUNT bigint,FILE1_SCOUNT bigint,FILE2_SCOUNT bigint,FILE1_FCOUNT bigint,FILE2_FCOUNT bigint,END_DATETIME varchar(14),BCOMP_READ_MODE varchar(1000))");
             s.execute("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(1,'20260920','1','A','2')");
             s.execute("create table TSS_BCOMP_DTL_NEW(BCOMP_INDEX int,TASK_DATE varchar(8),TASK_BATCH varchar(10),COMP_INDEX_STR varchar(1000),LINE_CONTENT1 varchar(2000),LINE_CONTENT2 varchar(2000),LINE_RESULT varchar(1),FDTL_REASON varchar(2000))");
-            s.execute("create table TSS_BCOMP_DIFFFIELD(BCOMP_INDEX int)");
+            s.execute("create table TSS_BCOMP_DIFFFIELD_NEW(BCOMP_INDEX int)");
             s.execute("create table OLD_DATA(ID int,VAL varchar(100))");
             s.execute("create table NEW_DATA(ID int,VAL varchar(100))");
             s.execute("insert into OLD_DATA values(1,'same'),(2,'old'),(3,'missing-new'),(5,'a'),(5,'b')");
