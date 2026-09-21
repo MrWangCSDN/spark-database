@@ -57,3 +57,48 @@ test('manager reviews dashboard, filters failed tasks, and opens a result', asyn
   await page.getByRole('tab', { name: '执行信息' }).click()
   await expect(page.getByRole('tabpanel')).toContainText('Spark 任务退出')
 })
+
+test('tests and saves a database connection, then retries cache refresh', async ({ page }) => {
+  let testedPassword: string | null = null
+  let savedPassword: string | null = null
+  let refreshCalls = 0
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/databases' && route.request().method() === 'GET') {
+      return route.fulfill({ json: { items: [], page: 0, size: 100, total: 0 } })
+    }
+    if (url.pathname === '/api/databases/test') {
+      testedPassword = (route.request().postDataJSON() as { newPassword: string }).newPassword
+      return route.fulfill({ json: { success: true, databaseProduct: 'GaussDB', databaseVersion: 'V500', elapsedMs: 31 } })
+    }
+    if (url.pathname === '/api/databases' && route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      savedPassword = body.newPassword as string
+      return route.fulfill({ status: 201, json: { ...body, newPassword: undefined, passwordConfigured: true } })
+    }
+    if (url.pathname === '/api/cache/refresh') {
+      refreshCalls += 1
+      return route.fulfill({ json: refreshCalls === 1 ? { code: 500, msg: '刷新失败' } : { code: 200, msg: '刷新成功' } })
+    }
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+  })
+
+  await page.goto('/databases')
+  await page.getByRole('button', { name: '新建连接' }).click()
+  await page.getByLabel('连接编号').fill('9')
+  await page.getByLabel('连接名称').fill('GaussDB A')
+  await page.getByLabel('JDBC URL').fill('jdbc:postgresql://db/core')
+  await page.getByLabel('用户名').fill('reader')
+  await page.getByLabel('新密码').fill('browser-secret')
+  await page.getByRole('button', { name: '测试连接' }).click()
+  await expect(page.getByText('连接成功 · GaussDB V500 · 31 ms')).toBeVisible()
+  expect(testedPassword).toBe('browser-secret')
+
+  await page.getByRole('button', { name: '保存连接' }).click()
+  await expect(page.getByText('连接已保存，但缓存刷新失败')).toBeVisible()
+  expect(savedPassword).toBe('browser-secret')
+  await expect(page.getByText('browser-secret')).toHaveCount(0)
+  await page.getByRole('button', { name: '重试刷新缓存' }).click()
+  await expect(page.getByText('新连接已加载到当前服务实例。')).toBeVisible()
+  expect(refreshCalls).toBe(2)
+})

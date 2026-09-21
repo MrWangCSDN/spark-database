@@ -2,6 +2,7 @@ package cn.sunline.tss.compare.database;
 
 import cn.sunline.tss.compare.api.ApiException;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ public final class DatabaseConnectionTester implements AutoCloseable {
     private final Duration timeout;
     private final ThreadPoolExecutor executor;
 
+    @Autowired
     public DatabaseConnectionTester(
         DatabaseConnectionProbe probe,
         @Value("${compare.database-test-timeout-seconds:10}") long timeoutSeconds,
