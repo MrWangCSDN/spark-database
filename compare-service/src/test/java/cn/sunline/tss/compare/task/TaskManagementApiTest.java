@@ -56,6 +56,36 @@ class TaskManagementApiTest {
     }
 
     @Test
+    void rejectsTaskWhenEitherCompatibleConnectionHasNoCurrentSchema() throws Exception {
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:postgresql://old/core',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:postgresql://new/core?currentSchema=business',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=2");
+
+        mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("CURRENT_SCHEMA_REQUIRED"));
+
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_TASK", Integer.class)).isZero();
+    }
+
+    @Test
+    void createsTaskWhenBothCompatibleConnectionsSpecifyCurrentSchema() throws Exception {
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:postgresql://old/core?ssl=true&currentSchema=business',DATABASE_DRIVER='org.postgresql.Driver' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:opengauss://new/core?CURRENTSCHEMA=business',DATABASE_DRIVER='org.opengauss.Driver' where DATABASE_ID=2");
+
+        mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
+            .andExpect(status().isCreated());
+    }
+
+    @Test
+    void createsTaskForOracleAndMysqlConnectionsWithoutCurrentSchema() throws Exception {
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:oracle:thin:@old:1521/core',DATABASE_DRIVER='oracle.jdbc.OracleDriver' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG set DATABASE_URL='jdbc:mysql://new/core',DATABASE_DRIVER='com.mysql.cj.jdbc.Driver' where DATABASE_ID=2");
+
+        mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
+            .andExpect(status().isCreated());
+    }
+
+    @Test
     void rejectsDuplicateThreePartIdentityEvenWithAnotherTimeNode() throws Exception {
         jdbc.update("insert into TSS_BCOMP_TASK(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) values(22,'20260920','001','AM','1')");
         String request = """
@@ -108,5 +138,11 @@ class TaskManagementApiTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.runningCount").value(1))
             .andExpect(jsonPath("$.recentTasks.length()").value(1));
+    }
+
+    private static String taskRequest() {
+        return """
+            {"bcompIndex":22,"taskBusinessDate":"20260920","verifyBusinessDate":"20260919","taskBatch":"001","timeNode":"EOD"}
+            """;
     }
 }

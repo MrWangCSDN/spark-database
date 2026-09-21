@@ -46,6 +46,20 @@ public class TaskManagementRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    ConfigurationConnections configurationConnections(long index) {
+        List<ConfigurationConnections> rows = jdbc.query("""
+            SELECT o.DATABASE_URL,o.DATABASE_DRIVER,d.DATABASE_URL,d.DATABASE_DRIVER
+            FROM TSS_BCOMP_TABLE_SQL s
+            JOIN TSS_BCOMP_DATABASE_CONFIG o ON o.DATABASE_ID=s.ORIG_DATABASE_ID
+            JOIN TSS_BCOMP_DATABASE_CONFIG d ON d.DATABASE_ID=s.DEST_DATABASE_ID
+            WHERE s.BCOMP_INDEX=?
+            """, (rs, n) -> new ConfigurationConnections(
+                new DatabaseEndpoint(rs.getString(1), rs.getString(2)),
+                new DatabaseEndpoint(rs.getString(3), rs.getString(4))
+            ), index);
+        return rows.size() == 1 ? rows.get(0) : null;
+    }
+
     boolean identityExists(long index, String date, String batch) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=?",
             Integer.class, index, date, batch);
@@ -144,4 +158,6 @@ public class TaskManagementRepository {
                                int businessKeyCount, int databaseReferenceCount) {
         boolean complete() { return sqlCount == 1 && fieldCount > 0 && businessKeyCount > 0 && databaseReferenceCount == 1; }
     }
+    record DatabaseEndpoint(String url, String driver) {}
+    record ConfigurationConnections(DatabaseEndpoint origin, DatabaseEndpoint destination) {}
 }

@@ -3,6 +3,7 @@ package cn.sunline.tss.compare.task;
 import cn.sunline.tss.compare.TaskWorker;
 import cn.sunline.tss.compare.api.ApiException;
 import cn.sunline.tss.compare.api.PageResult;
+import cn.sunline.tss.compare.database.JdbcCurrentSchemaPolicy;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -34,6 +35,12 @@ public class TaskManagementService {
         if ("2".equals(config.dateMode()) && (request.verifyBusinessDate() == null || !DATE.matcher(request.verifyBusinessDate()).matches())) {
             throw ApiException.badRequest("VERIFY_DATE_REQUIRED", "指定日期模式必须填写8位核对日期");
         }
+        var connections = repository.configurationConnections(request.bcompIndex());
+        if (connections == null) {
+            throw ApiException.badRequest("CONFIGURATION_INCOMPLETE", "库表核对配置不存在或不完整");
+        }
+        JdbcCurrentSchemaPolicy.requireValid(connections.origin().url(), connections.origin().driver());
+        JdbcCurrentSchemaPolicy.requireValid(connections.destination().url(), connections.destination().driver());
         TaskSummary created = repository.insertWaiting(request, config.name());
         if (created == null) throw ApiException.conflict("TASK_IDENTITY_CONFLICT", "同一核对编号、业务日期和批次的任务已存在");
         return created;
