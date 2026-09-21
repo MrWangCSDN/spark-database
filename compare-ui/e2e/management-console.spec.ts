@@ -34,3 +34,26 @@ test('creates a task and inspects its differences', async ({ page }) => {
   await expect(page.getByText('100.00|2026-09-20')).toBeVisible()
   await expect(page.getByText('101.00|2026-09-20')).toBeVisible()
 })
+
+test('manager reviews dashboard, filters failed tasks, and opens a result', async ({ page }) => {
+  const failed = { ...task, taskState: '4', taskResult: '1', failureReason: 'Spark 任务退出' }
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/dashboard') return route.fulfill({ json: { serviceStatus: '运行中', runningCount: 0, todayCompletedCount: 6, todayDifferenceCount: 1, updatedAt: '20260921100000', recentTasks: [failed] } })
+    if (url.pathname === '/api/tasks') return route.fulfill({ json: { items: [failed], page: 0, size: 20, total: 1 } })
+    if (url.pathname === '/api/tasks/8/20260920/1/D') return route.fulfill({ json: failed })
+    if (url.pathname.endsWith('/differences')) return route.fulfill({ json: { items: [], page: 0, size: 20, total: 0 } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+  })
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: '运行总览' })).toBeVisible()
+  await page.getByRole('link', { name: /核对任务/ }).click()
+  await page.getByLabel('任务状态').selectOption('4')
+  await page.getByRole('button', { name: '查询' }).click()
+  await expect(page).toHaveURL(/taskState=4/)
+  await page.getByRole('link', { name: '查看' }).first().click()
+  await expect(page.getByRole('tab', { name: '差异明细' })).toBeVisible()
+  await page.getByRole('tab', { name: '执行信息' }).click()
+  await expect(page.getByRole('tabpanel')).toContainText('Spark 任务退出')
+})
