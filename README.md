@@ -187,3 +187,5 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 回滚需同时恢复两个 JAR；新表数据不会自动复制回旧表。
 
 已执行前一版六表脚本的环境，只需补执行 `sql/add_bcomp_rule_tables_new.sql`；新环境执行完整九表脚本 `sql/create_bcomp_new.sql`。差异字段表仅保留当前代码查询依赖的 BCOMP_INDEX 列，不复制旧系统未使用的字段。
+
+发布包包含 `config/bd.env` 占位模板与 `config/application-local.properties`。启动前替换 CHANGE_ME、SPARK_HOME 和 SPARK_MASTER，并检查 Spark 资源参数。打包脚本始终从 `.example` 生成配置，不复制开发机的真实凭据。
