@@ -45,7 +45,7 @@ test('tests a new database draft and shows product metadata without saving', asy
   await user.click(await screen.findByRole('button', { name: '新建连接' }))
   await user.type(screen.getByLabelText('连接编号'), '9')
   await user.type(screen.getByLabelText('连接名称'), 'GaussDB A')
-  await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:postgresql://db/core')
+  await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:postgresql://db/core?currentSchema=business')
   await user.type(screen.getByLabelText('用户名'), 'reader')
   await user.type(screen.getByLabelText('新密码'), 'draft-secret')
   await user.click(screen.getByRole('button', { name: '测试连接' }))
@@ -89,7 +89,7 @@ test('clears a draft test result whenever a connection input changes', async () 
   await user.click(await screen.findByRole('button', { name: '新建连接' }))
   await user.type(screen.getByLabelText('连接编号'), '9')
   await user.type(screen.getByLabelText('连接名称'), 'GaussDB A')
-  await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:postgresql://db/core')
+  await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:postgresql://db/core?currentSchema=business')
   await user.type(screen.getByLabelText('用户名'), 'reader')
   await user.type(screen.getByLabelText('新密码'), 'secret')
 
@@ -135,4 +135,47 @@ test('refreshes cache after save and preserves a refresh warning', async () => {
   expect(refreshCalls).toBe(1)
   expect(screen.getByText('连接已保存，但缓存刷新失败')).toBeVisible()
   expect(screen.getByRole('button', { name: '重试刷新缓存' })).toBeVisible()
+})
+
+test('requires currentSchema before testing or saving a PostgreSQL-compatible connection', async () => {
+  let testCalls = 0, saveCalls = 0
+  server.use(
+    http.post('/api/databases/test', () => { testCalls += 1; return HttpResponse.json({}) }),
+    http.post('/api/databases', () => { saveCalls += 1; return HttpResponse.json({}, { status: 201 }) })
+  )
+  const user = userEvent.setup()
+  renderPage(<DatabasesPage />)
+  await user.click(await screen.findByRole('button', { name: '新建连接' }))
+  expect(screen.getByLabelText('JDBC URL')).toHaveAttribute('placeholder', 'jdbc:postgresql://host:5432/database?currentSchema=业务schema')
+  await user.type(screen.getByLabelText('连接编号'), '9')
+  await user.type(screen.getByLabelText('连接名称'), 'GaussDB A')
+  await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:postgresql://db/core')
+  await user.type(screen.getByLabelText('用户名'), 'reader')
+  await user.type(screen.getByLabelText('新密码'), 'secret')
+
+  expect(screen.getByLabelText('JDBC URL')).toHaveAttribute('aria-invalid', 'true')
+  expect(screen.getByRole('alert')).toHaveTextContent('currentSchema')
+  await user.click(screen.getByRole('button', { name: '测试连接' }))
+  await user.click(screen.getByRole('button', { name: '保存连接' }))
+  expect(testCalls).toBe(0)
+  expect(saveCalls).toBe(0)
+})
+
+test('does not require currentSchema for an Oracle connection', async () => {
+  let saveCalls = 0
+  server.use(http.post('/api/databases', () => { saveCalls += 1; return HttpResponse.json({}, { status: 201 }) }))
+  const user = userEvent.setup()
+  renderPage(<DatabasesPage />)
+  await user.click(await screen.findByRole('button', { name: '新建连接' }))
+  await user.type(screen.getByLabelText('连接编号'), '9')
+  await user.type(screen.getByLabelText('连接名称'), 'Oracle')
+  await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:oracle:thin:@db:1521/core')
+  await user.clear(screen.getByLabelText('驱动类', { exact: false }))
+  await user.type(screen.getByLabelText('驱动类', { exact: false }), 'oracle.jdbc.OracleDriver')
+  await user.type(screen.getByLabelText('用户名'), 'reader')
+  await user.type(screen.getByLabelText('新密码'), 'secret')
+
+  expect(screen.getByLabelText('JDBC URL')).toHaveAttribute('aria-invalid', 'false')
+  await user.click(screen.getByRole('button', { name: '保存连接' }))
+  await waitFor(() => expect(saveCalls).toBe(1))
 })

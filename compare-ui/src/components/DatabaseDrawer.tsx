@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import type { DatabaseConnectionTestResult, DatabaseSaveRequest, DatabaseSummary } from '../api/types'
+import { currentSchemaError } from '../database/currentSchema'
 
 type DatabaseDrawerProps = {
   database?: DatabaseSummary
@@ -29,6 +30,7 @@ export function DatabaseDrawer({ database, isSaving, onClose, onSave, onTestDraf
   const [testResult, setTestResult] = useState<DatabaseConnectionTestResult | null>(null)
   const [testError, setTestError] = useState('')
   const busy = isSaving || isTesting
+  const schemaError = currentSchemaError(form.url, form.driver)
 
   const updateForm = (patch: Partial<DatabaseSaveRequest>) => {
     setTestResult(null)
@@ -38,12 +40,14 @@ export function DatabaseDrawer({ database, isSaving, onClose, onSave, onTestDraf
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (busy) return
+    if (schemaError) { setTestError(schemaError); return }
     onSave({ ...form, newPassword: form.newPassword?.trim() || null })
   }
   const testConnection = async () => {
     if (busy) return
     setTestResult(null)
     setTestError('')
+    if (schemaError) { setTestError(schemaError); return }
     const password = form.newPassword?.trim() || null
     const connectionChanged = form.url !== initial.url || form.user !== initial.user || form.driver !== initial.driver
     setIsTesting(true)
@@ -69,7 +73,9 @@ export function DatabaseDrawer({ database, isSaving, onClose, onSave, onTestDraf
       <form className="form-stack" onSubmit={submit}>
         <label htmlFor="database-id">连接编号<input id="database-id" type="number" min="1" disabled={!!database || busy} value={form.databaseId || ''} onChange={event => updateForm({ databaseId: Number(event.target.value) })} required /></label>
         <label htmlFor="database-name">连接名称<input id="database-name" disabled={busy} value={form.databaseName} onChange={event => updateForm({ databaseName: event.target.value })} required /></label>
-        <label htmlFor="database-url">JDBC URL<input id="database-url" disabled={busy} value={form.url} onChange={event => updateForm({ url: event.target.value })} required /></label>
+        <label htmlFor="database-url">JDBC URL<input id="database-url" disabled={busy} value={form.url} placeholder="jdbc:postgresql://host:5432/database?currentSchema=业务schema" aria-invalid={Boolean(schemaError)} aria-describedby={schemaError ? 'database-url-help database-url-error' : 'database-url-help'} onChange={event => updateForm({ url: event.target.value })} required /></label>
+        <small id="database-url-help">GaussDB/PostgreSQL 兼容连接必须通过 currentSchema 指定业务 schema。</small>
+        {schemaError && <small id="database-url-error" className="field-error" role="alert">{schemaError}</small>}
         <label htmlFor="database-user">用户名<input id="database-user" disabled={busy} value={form.user} onChange={event => updateForm({ user: event.target.value })} required /></label>
         <label htmlFor="database-driver">驱动类<input id="database-driver" list="database-driver-options" disabled={busy} value={form.driver} onChange={event => updateForm({ driver: event.target.value })} required />
           <datalist id="database-driver-options"><option value="org.postgresql.Driver" /><option value="oracle.jdbc.OracleDriver" /><option value="com.mysql.cj.jdbc.Driver" /><option value="com.huawei.gaussdb.jdbc.Driver" /><option value="org.opengauss.Driver" /></datalist>
