@@ -18,6 +18,7 @@ public class DatabaseConnectionTestService {
 
     public DatabaseConnectionTestResult testDraft(DatabaseSaveRequest request) {
         validateDraft(request);
+        JdbcCurrentSchemaPolicy.requireValid(request.url(), request.driver());
         return tester.test(new DatabaseConnectionSpec(
             request.url().trim(),
             request.user().trim(),
@@ -31,6 +32,7 @@ public class DatabaseConnectionTestService {
         if (stored == null) {
             throw ApiException.notFound("DATABASE_NOT_FOUND", "数据库连接不存在");
         }
+        JdbcCurrentSchemaPolicy.requireValid(stored.url(), stored.driver());
         String temporaryPassword = request == null ? null : request.newPassword();
         String password = isBlank(temporaryPassword) ? plaintext(stored) : temporaryPassword;
         return tester.test(new DatabaseConnectionSpec(

@@ -16,6 +16,7 @@ public class DatabaseManagementService {
 
     public DatabaseSummary create(DatabaseSaveRequest request){
         validate(request,true);
+        JdbcCurrentSchemaPolicy.requireValid(request.url(),request.driver());
         if(repository.find(request.databaseId())!=null)throw ApiException.conflict("DATABASE_ID_CONFLICT","数据库连接编号已存在");
         var stored=stored(request,null);
         repository.insert(stored);
@@ -25,6 +26,7 @@ public class DatabaseManagementService {
     public DatabaseSummary update(long id,DatabaseSaveRequest request){
         if(id!=request.databaseId())throw ApiException.badRequest("DATABASE_ID_MISMATCH","路径编号与请求编号不一致");
         validate(request,false);
+        JdbcCurrentSchemaPolicy.requireValid(request.url(),request.driver());
         var current=repository.find(id);
         if(current==null)throw ApiException.notFound("DATABASE_NOT_FOUND","数据库连接不存在");
         if(repository.inUse(id))throw ApiException.conflict("DATABASE_IN_USE","数据库连接正被等待或运行任务引用");

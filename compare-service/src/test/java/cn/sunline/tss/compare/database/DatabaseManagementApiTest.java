@@ -65,7 +65,7 @@ class DatabaseManagementApiTest {
 
     @Test void createsEncryptedPasswordAndNeverReturnsPasswordMaterial() throws Exception {
         String request = """
-            {"databaseId":7,"databaseName":"GaussDB-A","url":"jdbc:gaussdb://db/core","user":"compare","driver":"com.huawei.Driver","encryption":"1","newPassword":"plain-password"}
+            {"databaseId":7,"databaseName":"GaussDB-A","url":"jdbc:gaussdb://db/core?currentSchema=tssreplay","user":"compare","driver":"com.huawei.Driver","encryption":"1","newPassword":"plain-password"}
             """;
         String response = mvc.perform(post("/api/databases").contentType(APPLICATION_JSON).content(request))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.passwordConfigured").value(true))
@@ -74,6 +74,33 @@ class DatabaseManagementApiTest {
         var row = jdbc.queryForMap("select DATABASE_PASSWORD,DATABASE_GENERATERKEY from TSS_BCOMP_DATABASE_CONFIG where DATABASE_ID=7");
         assertThat(row.get("DATABASE_PASSWORD")).isNotEqualTo("plain-password");
         assertThat(PasswordEncryption.decrypt(row.get("DATABASE_PASSWORD").toString(), row.get("DATABASE_GENERATERKEY").toString())).isEqualTo("plain-password");
+    }
+
+    @Test void rejectsCreatingCompatibleConnectionWithoutCurrentSchema() throws Exception {
+        mvc.perform(post("/api/databases").contentType(APPLICATION_JSON).content("""
+            {"databaseId":7,"databaseName":"GaussDB-A","url":"jdbc:postgresql://db/core","user":"compare","driver":"org.postgresql.Driver","encryption":"1","newPassword":"secret"}
+            """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("CURRENT_SCHEMA_REQUIRED"));
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_DATABASE_CONFIG", Integer.class)).isZero();
+    }
+
+    @Test void rejectsDraftCompatibleConnectionBeforeCallingProbe() throws Exception {
+        mvc.perform(post("/api/databases/test").contentType(APPLICATION_JSON).content("""
+            {"databaseId":9,"databaseName":"draft","url":"jdbc:postgresql://db/core?ssl=true","user":"reader","driver":"org.postgresql.Driver","encryption":"1","newPassword":"secret"}
+            """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("CURRENT_SCHEMA_REQUIRED"));
+        assertThat(recorded.get()).isNull();
+    }
+
+    @Test void rejectsTestingSavedLegacyCompatibleConnectionBeforeCallingProbe() throws Exception {
+        jdbc.update("insert into TSS_BCOMP_DATABASE_CONFIG values(7,'legacy','jdbc:postgresql://db/core','reader','secret','org.postgresql.Driver','0',null)");
+
+        mvc.perform(post("/api/databases/7/test"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("CURRENT_SCHEMA_REQUIRED"));
+        assertThat(recorded.get()).isNull();
     }
 
     @Test void blankPasswordUpdateKeepsExistingCipherAndKey() throws Exception {
