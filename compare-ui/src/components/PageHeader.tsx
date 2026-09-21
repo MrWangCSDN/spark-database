@@ -1,0 +1,21 @@
+import type { ReactNode } from 'react'
+
+interface PageHeaderProps {
+  eyebrow: string
+  title: string
+  description: string
+  actions?: ReactNode
+  meta?: ReactNode
+}
+
+export function PageHeader({ eyebrow, title, description, actions, meta }: PageHeaderProps) {
+  return <header className="page-header">
+    <div className="page-header-copy">
+      <span className="eyebrow">{eyebrow}</span>
+      <h1>{title}</h1>
+      <p>{description}</p>
+      {meta && <small className="page-header-meta">{meta}</small>}
+    </div>
+    {actions && <div className="page-header-actions">{actions}</div>}
+  </header>
+}
