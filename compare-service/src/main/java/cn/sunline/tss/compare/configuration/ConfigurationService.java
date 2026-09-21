@@ -3,6 +3,13 @@ package cn.sunline.tss.compare.configuration;
 import cn.sunline.tss.compare.api.ApiException;
 import cn.sunline.tss.compare.api.PageResult;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import java.util.HashSet;
 import java.util.List;
@@ -13,7 +20,10 @@ public class ConfigurationService {
     private static final Set<String> TYPES=Set.of("1","2","3","4");
     private final ConfigurationRepository repository;
     private final CacheReloader cache;
-    public ConfigurationService(ConfigurationRepository repository,CacheReloader cache){this.repository=repository;this.cache=cache;}
+    private final long maxImportBytes;
+    private final AxonConfigScriptParser scriptParser=new AxonConfigScriptParser();
+    public ConfigurationService(ConfigurationRepository repository,CacheReloader cache){this(repository,cache,52_428_800L);}
+    @Autowired public ConfigurationService(ConfigurationRepository repository,CacheReloader cache,@Value("${compare.config-import-max-bytes:52428800}")long maxImportBytes){this.repository=repository;this.cache=cache;this.maxImportBytes=maxImportBytes;}
 
     public PageResult<BasicConfiguration> list(int page,int size){if(page<0||size<1||size>100)throw ApiException.badRequest("INVALID_PAGE","分页参数不合法");return repository.list(page,size);}
     public ConfigurationDetail find(long index){var value=repository.find(index);if(value==null)throw ApiException.notFound("CONFIGURATION_NOT_FOUND","核对配置不存在");return value;}
@@ -37,6 +47,18 @@ public class ConfigurationService {
         return create(command);
     }
     public ConfigurationOptions options(){return repository.options();}
+
+    public ConfigScriptImportResult importScript(MultipartFile file){
+        if(file==null||file.isEmpty())throw ApiException.badRequest("CONFIG_SCRIPT_REQUIRED","请选择或粘贴 Axon 配置脚本");
+        if(file.getSize()>maxImportBytes)throw ApiException.payloadTooLarge("CONFIG_SCRIPT_TOO_LARGE","配置脚本超过允许的大小");
+        AxonConfigScriptParser.ParseResult counts;
+        try(var reader=new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8)){
+            counts=repository.importScript(reader,scriptParser);
+        }catch(IOException exception){throw ApiException.badRequest("CONFIG_SCRIPT_READ_FAILED","配置脚本读取失败");}
+        boolean refreshed=true;
+        try{cache.reload();}catch(RuntimeException exception){refreshed=false;}
+        return new ConfigScriptImportResult(true,refreshed,counts.configurationCount(),counts.fieldCount(),counts.tableSqlCount(),refreshed?null:"配置已导入，但缓存刷新失败");
+    }
 
     private ConfigurationSaveResult finish(long index){
         boolean refreshed=true;try{cache.reload();}catch(RuntimeException e){refreshed=false;}

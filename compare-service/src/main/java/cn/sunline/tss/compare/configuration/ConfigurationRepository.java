@@ -3,12 +3,14 @@ package cn.sunline.tss.compare.configuration;
 import cn.sunline.tss.compare.api.PageResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.util.List;
+import java.io.Reader;
 
 @Repository
 public class ConfigurationRepository {
@@ -38,6 +40,28 @@ public class ConfigurationRepository {
 
     boolean inUse(long index){Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK WHERE BCOMP_INDEX=? AND TASK_STATE IN ('1','2')",Integer.class,index);return count!=null&&count>0;}
     boolean databasesExist(long oldId,long newId){Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DATABASE_CONFIG WHERE DATABASE_ID IN (?,?)",Integer.class,oldId,newId);return count!=null&&count==(oldId==newId?1:2);}
+
+    AxonConfigScriptParser.ParseResult importScript(Reader reader,AxonConfigScriptParser parser){
+        try {
+            return transaction.execute(status->{
+                Integer active=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK WHERE TASK_STATE IN ('1','2')",Integer.class);
+                if(active!=null&&active>0)throw cn.sunline.tss.compare.api.ApiException.conflict("CONFIG_IMPORT_TASKS_ACTIVE","存在等待或运行任务，不能替换核对配置");
+                var parsed=parser.parse(reader,command->{
+                    if(command.kind()==AxonConfigScriptParser.Kind.CLEAR)jdbc.update("DELETE FROM "+command.value());
+                    else jdbc.update(command.value());
+                });
+                Long configurations=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF",Long.class);
+                Long fields=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD",Long.class);
+                Long sqls=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL",Long.class);
+                if(configurations==null||fields==null||sqls==null||configurations!=parsed.configurationCount()||fields!=parsed.fieldCount()||sqls!=parsed.tableSqlCount()||configurations.longValue()!=sqls.longValue())
+                    throw cn.sunline.tss.compare.api.ApiException.badRequest("INVALID_CONFIG_SCRIPT","配置脚本三表数据数量不一致");
+                Integer missingDatabases=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL s LEFT JOIN TSS_BCOMP_DATABASE_CONFIG o ON o.DATABASE_ID=s.ORIG_DATABASE_ID LEFT JOIN TSS_BCOMP_DATABASE_CONFIG d ON d.DATABASE_ID=s.DEST_DATABASE_ID WHERE o.DATABASE_ID IS NULL OR d.DATABASE_ID IS NULL",Integer.class);
+                if(missingDatabases!=null&&missingDatabases>0)throw cn.sunline.tss.compare.api.ApiException.badRequest("INVALID_CONFIG_SCRIPT","配置脚本引用的数据库连接不存在");
+                return new AxonConfigScriptParser.ParseResult(configurations,fields,sqls);
+            });
+        } catch(cn.sunline.tss.compare.api.ApiException exception){throw exception;}
+        catch(DataAccessException exception){throw cn.sunline.tss.compare.api.ApiException.unprocessable("CONFIG_SCRIPT_EXECUTION_FAILED","配置脚本执行失败，请检查脚本与数据库约束",exception);}
+    }
 
     void insert(ConfigurationCommand command){transaction.executeWithoutResult(status->{insertBasic(command.basic());insertSql(command.basic().bcompIndex(),command.tableSql());insertFields(command.basic().bcompIndex(),command.fields());});}
     void update(ConfigurationCommand command){transaction.executeWithoutResult(status->{

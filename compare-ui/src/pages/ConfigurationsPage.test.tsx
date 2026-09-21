@@ -9,5 +9,5 @@ test('shows configuration list loading and empty states without changing table s
   renderPage(<ConfigurationsPage />, '/configurations')
 
   expect(await screen.findByText('还没有核对配置')).toBeVisible()
-  expect(screen.getByRole('link', { name: '新建配置' })).toHaveAttribute('href', '/configurations/new')
+  expect(screen.getByRole('link', { name: '导入 Axon 配置' })).toHaveAttribute('href', '/configurations/new')
 })

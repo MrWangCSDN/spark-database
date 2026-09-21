@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.UUID;
 
@@ -28,6 +29,13 @@ public class ApiExceptionHandler {
         String traceId = traceId();
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(new ApiError("RESOURCE_NOT_FOUND", "请求的资源不存在", traceId));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiError> uploadTooLarge(MaxUploadSizeExceededException exception) {
+        String traceId = traceId();
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+            .body(new ApiError("CONFIG_SCRIPT_TOO_LARGE", "配置脚本超过允许的大小", traceId));
     }
 
     @ExceptionHandler(Exception.class)

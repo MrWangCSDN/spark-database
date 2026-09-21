@@ -13,6 +13,7 @@ export interface TableSqlConfiguration { origDatabaseId: number; destDatabaseId:
 export interface FieldRule { name: string; type: string; memo: string; oldIndex: number; newIndex: number; indexFlag: string; enumFlag: string; enumIndex: number | null; partitionFlag: string; ignoreValue: string | null; ignoreFlag: string }
 export interface ConfigurationDetail { basic: BasicConfiguration; tableSql: TableSqlConfiguration; fields: FieldRule[] }
 export interface ConfigurationSaveResult { configuration: ConfigurationDetail; saved: boolean; cacheRefreshed: boolean; warning?: string | null }
+export interface ConfigScriptImportResult { saved: boolean; cacheRefreshed: boolean; configurationCount: number; fieldCount: number; tableSqlCount: number; warning?: string | null }
 export interface ConfigurationOptions { states: string[]; enums: Array<{ index: number; oldValue: string; newValue: string }>; ignoreValues: Array<{ id: number; value: string }> }
 export interface DatabaseSummary { databaseId: number; databaseName: string; url: string; user: string; driver: string; encryption: string; passwordConfigured: boolean }
 export interface DatabaseSaveRequest { databaseId: number; databaseName: string; url: string; user: string; driver: string; encryption: string; newPassword: string | null }

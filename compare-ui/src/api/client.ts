@@ -5,7 +5,9 @@ export class RequestError extends Error {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
+  const headers = new Headers(init?.headers)
+  if (!(init?.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const response = await fetch(path, { ...init, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => ({ code: 'HTTP_ERROR', message: '请求失败' })) as ApiError
     throw new RequestError(response.status, body.code, body.message, body.traceId)

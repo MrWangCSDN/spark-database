@@ -32,4 +32,12 @@ public class ApiException extends RuntimeException {
     public static ApiException conflict(String code, String message) {
         return new ApiException(HttpStatus.CONFLICT, code, message);
     }
+
+    public static ApiException payloadTooLarge(String code, String message) {
+        return new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, code, message);
+    }
+
+    public static ApiException unprocessable(String code, String message, Throwable cause) {
+        return new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, code, message, cause);
+    }
 }

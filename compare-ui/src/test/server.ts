@@ -22,6 +22,7 @@ export const handlers = [
   http.post('/api/databases/:id/test', () => HttpResponse.json({ success: true, databaseProduct: 'GaussDB', databaseVersion: 'V500', elapsedMs: 25 })),
   http.post('/api/cache/refresh', () => HttpResponse.json({ code: 200, msg: '刷新成功' })),
   http.put('/api/configurations/8', async () => HttpResponse.json({ configuration: {}, saved: true, cacheRefreshed: false, warning: '配置已保存，但缓存刷新失败' })),
+  http.post('/api/configurations/import', async () => HttpResponse.json({ saved: true, cacheRefreshed: true, configurationCount: 1, fieldCount: 2, tableSqlCount: 1, warning: null })),
   http.put('/api/databases/1', async ({ request }) => HttpResponse.json({ ...(await request.json() as object), passwordConfigured: true }))
 ]
 
