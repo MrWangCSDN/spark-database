@@ -87,7 +87,7 @@ test('tests and saves a database connection, then retries cache refresh', async 
   await page.getByRole('button', { name: '新建连接' }).click()
   await page.getByLabel('连接编号').fill('9')
   await page.getByLabel('连接名称').fill('GaussDB A')
-  await page.getByLabel('JDBC URL').fill('jdbc:postgresql://db/core')
+  await page.getByLabel('JDBC URL').fill('jdbc:postgresql://db/core?currentSchema=business')
   await page.getByLabel('用户名').fill('reader')
   await page.getByLabel('新密码').fill('browser-secret')
   await page.getByRole('button', { name: '测试连接' }).click()

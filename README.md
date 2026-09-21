@@ -57,7 +57,7 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 
 服务根路径打开管理台，提供运行总览、任务创建与分页查询、任务详情和差异分页、核对配置创建/编辑/复制、数据库连接创建/编辑，以及 light/dark/system 主题。列表默认每页20条，最多100条；页面仅管理 `BCOMP_TYPE='2'`。
 
-管理台继续写原 `TSS_BCOMP_*` 表，不新增生产 DDL，也不改变字段编码。配置以基本信息、两侧 SQL、字段规则为一个事务保存；状态1或2任务引用配置或数据库连接时拒绝修改。数据库密码与生成密钥不会出现在 API 响应，编辑时留空密码表示保留原密文。
+管理台继续写原 `TSS_BCOMP_*` 表，不新增生产 DDL，也不改变字段编码。配置以基本信息、两侧 SQL、字段规则为一个事务保存；状态1或2任务引用配置或数据库连接时拒绝修改。数据库密码与生成密钥不会出现在 API 响应，编辑时留空密码表示保留原密文。GaussDB、openGauss、PostgreSQL 兼容的比对连接必须在 JDBC URL 中提供非空 `currentSchema`；新建、修改、连接测试和创建任务都会校验，两侧连接缺少该参数时返回 `CURRENT_SCHEMA_REQUIRED`。
 
 主要 API：
 
@@ -80,10 +80,11 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 2. 将 `config/application-local.properties.example` 复制为 `config/application-local.properties`，设置元数据库连接和 Spark 地址。也可把旧 `application-datasource.properties`、`application-executor.properties`、`application-spark.properties` 放在 `config/` 中；原数据库 `primary=frw` 及 `spring.datasource.dynamic.datasource.frw.*` 无需改名。不要复制旧 `application.properties` 的文件/Redis/MyBatis profiles。
 3. 修改**部署属性** `app_resource`，指向新 `jobs/compare-spark-1.0.0-SNAPSHOT.jar`；设置 `spark_home` 指向本机 Spark 3.5.3。`spark_mainClass` 支持原“文件类,库表类”配置或单个库表类。没有修改数据库中任何表配置。
 4. 按数据库实际协议选择驱动：
-   - PostgreSQL 兼容的 GaussDB A：`jdbc:postgresql://host:port/database` 与 `org.postgresql.Driver`，发布包已包含 PostgreSQL 驱动。
-   - 华为原生协议：`jdbc:gaussdb://host:port/database` 与现场厂商文档指定的驱动类；将有合法授权的原生驱动 JAR 放入 `drivers/`。
-   - openGauss：按现场版本确认 JDBC URL，驱动类通常为 `org.opengauss.Driver`；将现场确认的驱动 JAR 放入 `drivers/`。
+   - PostgreSQL 兼容的 GaussDB A：`jdbc:postgresql://host:port/database?currentSchema=业务schema` 与 `org.postgresql.Driver`，发布包已包含 PostgreSQL 驱动。
+   - 华为原生协议：`jdbc:gaussdb://host:port/database?currentSchema=业务schema` 与现场厂商文档指定的驱动类；将有合法授权的原生驱动 JAR 放入 `drivers/`。
+   - openGauss：按现场版本确认 JDBC URL，例如 `jdbc:opengauss://host:port/database?currentSchema=业务schema`，驱动类通常为 `org.opengauss.Driver`；将现场确认的驱动 JAR 放入 `drivers/`。
    PostgreSQL 驱动不能处理 `jdbc:gaussdb` 等其他协议。工程不下载或捆绑厂商闭源驱动。
+   `currentSchema` 参数名大小写不敏感，但解码后的值不能为空。已有不合规连接仍可查看，服务不会推断或自动改写 schema；再次保存、测试或用于新任务前必须人工补齐。该规则只约束 `TSS_BCOMP_DATABASE_CONFIG` 中的比对连接，不约束微服务自身的 `spring.datasource.*` 或 Spark 元数据库的 `spark.datasource.*`。
 5. `bin/start.sh` 使用 Boot PropertiesLauncher 的 `loader.path` 把 `drivers/` 加入服务类路径，并通过 `COMPARE_SPARK_JARS` 将同目录 JAR 传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动绝对路径。原生驱动必须在每个 Spark 节点可读，Driver和Executor节点必须能访问原库、目标库、元数据库。
 6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值：
 
@@ -102,7 +103,7 @@ export TSS_METADATA_DRIVER='your.driver.Class'
 
 Spark写任务/结果的 `spark.datasource.*` 和服务元数据源**必须指向同一逻辑库**。原Spark资源参数值保留在示例中，仅作为原配置记录，不代表适合当前服务器或保证2000万行安全。`maxPoolSize=1`表示一次一个Spark作业；并发数是每个服务实例的并发，实例数增加会叠加。
 
-管理台连接测试默认超时10秒、每个服务实例最多4个并发，可通过 `compare.database-test-timeout-seconds` 和 `compare.database-test-max-concurrency` 调整。测试只建立一条 JDBC 连接、调用标准有效性检查并读取产品/版本，不执行配置 SQL。驱动缺失、超时和连接失败只返回稳定错误分类，不回显 URL、用户、密码或驱动异常原文。
+管理台连接测试默认超时10秒、每个服务实例最多4个并发，可通过 `compare.database-test-timeout-seconds` 和 `compare.database-test-max-concurrency` 调整。测试只建立一条 JDBC 连接、调用标准有效性检查并读取产品/版本，不执行配置 SQL。驱动缺失、超时和连接失败只返回稳定错误分类，不回显 URL、用户、密码或驱动异常原文。`currentSchema` 校验只能保证 URL 明确选择 schema，不能替代现场网络、TLS、账号权限和真实 GaussDB 连接测试。
 
 有现场测试库时，可显式执行真实 GaussDB 探测；以下变量只在当前命令进程中读取，不写入仓库或测试报告：
 

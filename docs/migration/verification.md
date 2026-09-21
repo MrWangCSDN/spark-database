@@ -1,4 +1,4 @@
-# 迁移验证记录（2026-09-20）
+# 迁移验证记录（2026-09-21）
 
 环境：JDK 17.0.12、Maven 3.9、Spark 3.5.3 local[2]、H2测试库。生产元数据库和业务库均未连接。
 
@@ -6,15 +6,16 @@
 
 - 服务模块管理与兼容测试：库表类型过滤、两个线程条件领取、歧义任务跳过、失败回写、21位置参数、原AES协议、旧frw属性、原主类列表、结果完整性、刷新成功/失败/超时、在途任务后继续领取、停机中断与停止领取、管理 API、原HTTP接口，以及无文件/Redis依赖的完整Boot启动。
 - Spark模块2项测试：参数不完整时在启动Spark前拒绝；通过原main创建SparkSession并执行原Kryo、JDBC读取、cogroup、批量入库路径，小数据包含相同/差异/缺行/重复键。
-- 前端10个 Vitest 文件共31项测试和3项 Chromium 流程测试：创建任务、任务列表刷新、管理视图下钻、差异代码映射与两侧内容展开、数据库草稿连接测试、连续保存时的缓存刷新警告与重试、密码不回填及空密码保留。
+- 前端12个 Vitest 文件共43项测试和3项 Chromium 流程测试：创建任务、任务列表刷新、管理视图下钻、差异代码映射与两侧内容展开、数据库草稿连接测试、连续保存时的缓存刷新警告与重试、密码不回填及空密码保留，以及比对连接 `currentSchema` 的兼容类型判断和页面拦截。
 - 原Spark源码SHA-256校验；从SparkRun开始直至文件结束的业务代码与来源逐字一致。Git归档统一换行符，逻辑不变。
 - Boot 冒烟测试确认 `/tasks` 返回同包 SPA，未知 `/api/*` 保持404；前端 Maven 构建固定 Node/npm 版本。
 - 服务包不含Spark Core/SQL及作业类，作业包不含Boot嵌套布局；测试建表脚本不在发布包中；服务 JAR 包含 `BOOT-INF/classes/static/index.html`。
 - 数据库连接测试单元/API测试覆盖有界并发、超时、驱动缺失、异常脱敏、草稿不落库、已保存密码解密和临时密码不写回；前端覆盖草稿/已保存连接分流、结果失效、操作禁用和保存后缓存刷新警告。
+- GaussDB、openGauss、PostgreSQL 兼容比对连接缺少非空 `currentSchema` 时，连接新建/修改、草稿/已保存连接测试和任务创建均在持久化或探测前返回 `CURRENT_SCHEMA_REQUIRED`；Oracle/MySQL 以及应用和Spark元数据库连接不受该规则影响。历史不合规连接保持可查询且不被自动改写。
 - 未设置 `GAUSSDB_TEST_URL/USER/PASSWORD` 时执行 `GaussDbConnectionIntegrationTest`：1项跳过、0次连接，构建成功。
 
 ## 尚未验证
 
-真实 GaussDB 尚未验证：当前没有现场 URL、账号、密码、TLS材料或厂商原生驱动。目标Spark资源管理器、现场SQL/字段配置、2000万行容量、差异写入负载，以及OOM/时间字段异常修复也尚未验证。管理台是按现有表和新 API 重新开发，源工程没有页面源码可做像素或交互迁移对照。
+真实 GaussDB 尚未验证：当前没有现场 URL、账号、密码、TLS材料或厂商原生驱动。`currentSchema` URL 规则已自动验证，但它不能证明现场连接、权限或 schema 中对象可访问。目标Spark资源管理器、现场SQL/字段配置、2000万行容量、差异写入负载，以及OOM/时间字段异常修复也尚未验证。管理台是按现有表和新 API 重新开发，源工程没有页面源码可做像素或交互迁移对照。
 
 构建命令：`mvn clean verify`；前端浏览器流程：`cd compare-ui && npm run e2e`；发布命令：`bin/package.sh`。本机Maven镜像较慢，执行时用临时settings指向Maven Central，未修改全局Maven配置。
