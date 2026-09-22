@@ -40,6 +40,36 @@ class TaskManagementApiTest {
     }
 
     @Test
+    void preservesBatchTaskNameAndDetailsAfterConfigurationReplacement() throws Exception {
+        mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
+            .andExpect(status().isCreated());
+        String batch = jdbc.queryForObject("select TASK_BATCH from TSS_BCOMP_TASK_NEW", String.class);
+        jdbc.update("insert into TSS_BCOMP_BATCH_NEW values(?, 'history-request', 'hash', '20260920', '20260919', null, '20260920120000', 1)", batch);
+        jdbc.update("insert into TSS_BCOMP_BATCH_ITEM_NEW values(?,22,'历史配置名称','CORE','EOD','20260919','hash')", batch);
+        jdbc.update("delete from TSS_BCOMP_CONF_NEW");
+
+        mvc.perform(get("/api/tasks")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].configurationName").value("历史配置名称"));
+        mvc.perform(get("/api/tasks/22/20260920/" + batch + "/EOD"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.configurationName").value("历史配置名称"));
+        mvc.perform(get("/api/tasks").param("keyword", "历史配置"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1));
+        mvc.perform(get("/api/dashboard")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.recentTasks[0].configurationName").value("历史配置名称"));
+    }
+
+    @Test
+    void retainsLegacyTaskWithoutBatchSnapshotAfterConfigurationDeletion() throws Exception {
+        mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
+            .andExpect(status().isCreated());
+        jdbc.update("delete from TSS_BCOMP_CONF_NEW");
+        mvc.perform(get("/api/tasks")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].configurationName").value("22"));
+    }
+
+    @Test
     void createsWaitingTaskUsingOriginalColumns() throws Exception {
         String request = """
             {"bcompIndex":22,"taskBusinessDate":"20260920","verifyBusinessDate":"20260919","taskBatch":"001","timeNode":"EOD"}

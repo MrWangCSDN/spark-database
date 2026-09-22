@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TaskDetailPage } from './TaskDetailPage'
 import { renderPage } from '../test/render'
-import { server } from '../test/server'
+import { server, task } from '../test/server'
 
 test('shows mapped difference result and expands original values', async () => {
   const user = userEvent.setup()
@@ -27,4 +27,12 @@ test('shows a task request failure without requesting misleading content', async
   server.use(http.get('/api/tasks/8/20260920/1/D', () => HttpResponse.json({}, { status: 500 })))
   renderPage(<TaskDetailPage />, '/tasks/8/20260920/1/D')
   expect(await screen.findByRole('alert')).toHaveTextContent('任务详情加载失败')
+})
+
+test('opens a failed task at its execution information and preserves the return batch', async () => {
+  server.use(http.get('/api/tasks/8/20260920/1/D', () => HttpResponse.json({ ...task, taskState: '4', failureReason: 'Spark 执行失败' })))
+  renderPage(<TaskDetailPage />, '/tasks/8/20260920/1/D?batchId=batch-001&tab=execution')
+  expect(await screen.findByRole('tab', { name: '执行信息' })).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByRole('tabpanel')).toHaveTextContent('Spark 执行失败')
+  expect(screen.getByRole('link', { name: '← 返回核对批次' })).toHaveAttribute('href', '/batches/batch-001')
 })

@@ -21,7 +21,14 @@ import java.util.List;
 public class TaskManagementRepository {
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.BASIC_ISO_DATE;
-    private static final String SELECT_TASK = "SELECT t.BCOMP_INDEX,c.BCOMP_NAME,t.TASK_BUSI_DATE,t.VERIFY_BUSINESS_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.CREATE_DATETIME,t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE FROM TSS_BCOMP_TASK_NEW t JOIN TSS_BCOMP_CONF_NEW c ON c.BCOMP_INDEX=t.BCOMP_INDEX ";
+    private static final String TASK_NAME = "COALESCE(bi.CONFIGURATION_NAME,c.BCOMP_NAME,CAST(t.BCOMP_INDEX AS VARCHAR))";
+    private static final String TASK_FROM = " FROM TSS_BCOMP_TASK_NEW t"
+        + " LEFT JOIN TSS_BCOMP_CONF_NEW c ON c.BCOMP_INDEX=t.BCOMP_INDEX"
+        + " LEFT JOIN TSS_BCOMP_BATCH_NEW b ON b.BATCH_ID=t.TASK_BATCH AND b.TASK_BUSI_DATE=t.TASK_BUSI_DATE"
+        + " LEFT JOIN TSS_BCOMP_BATCH_ITEM_NEW bi ON bi.BATCH_ID=b.BATCH_ID AND bi.BCOMP_INDEX=t.BCOMP_INDEX ";
+    private static final String VISIBLE_TASK = "(c.BCOMP_TYPE='2' OR c.BCOMP_INDEX IS NULL OR bi.BATCH_ID IS NOT NULL)";
+    private static final String SELECT_TASK = "SELECT t.BCOMP_INDEX," + TASK_NAME
+        + ",t.TASK_BUSI_DATE,t.VERIFY_BUSINESS_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.CREATE_DATETIME,t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE" + TASK_FROM;
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
@@ -80,7 +87,7 @@ public class TaskManagementRepository {
     }
 
     PageResult<TaskSummary> findTasks(TaskSearch search) {
-        var where = new StringBuilder(" WHERE c.BCOMP_TYPE='2'");
+        var where = new StringBuilder(" WHERE " + VISIBLE_TASK);
         var params = new ArrayList<Object>();
         add(where, params, "t.BCOMP_INDEX=?", search.bcompIndex());
         add(where, params, "t.TASK_STATE=?", blankToNull(search.taskState()));
@@ -88,11 +95,11 @@ public class TaskManagementRepository {
         add(where, params, "t.TASK_BUSI_DATE>=?", blankToNull(search.dateFrom()));
         add(where, params, "t.TASK_BUSI_DATE<=?", blankToNull(search.dateTo()));
         if (blankToNull(search.keyword()) != null) {
-            where.append(" AND (LOWER(c.BCOMP_NAME) LIKE ? OR LOWER(t.TASK_BATCH) LIKE ?)");
+            where.append(" AND (LOWER(" + TASK_NAME + ") LIKE ? OR LOWER(t.TASK_BATCH) LIKE ?)");
             String pattern = "%" + search.keyword().toLowerCase() + "%";
             params.add(pattern); params.add(pattern);
         }
-        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW t JOIN TSS_BCOMP_CONF_NEW c ON c.BCOMP_INDEX=t.BCOMP_INDEX" + where,
+        Long total = jdbc.queryForObject("SELECT COUNT(*)" + TASK_FROM + where,
             Long.class, params.toArray());
         List<Object> pageParams = new ArrayList<>(params);
         pageParams.add(search.page() * search.size()); pageParams.add(search.size());
@@ -125,7 +132,7 @@ public class TaskManagementRepository {
         long running = count("TASK_STATE='2'", new Object[0]);
         long completed = count("TASK_BUSI_DATE=? AND TASK_STATE='3'", new Object[]{today});
         long differences = count("TASK_BUSI_DATE=? AND TASK_STATE='3' AND TASK_RESULT='1'", new Object[]{today});
-        List<TaskSummary> recent = jdbc.query(SELECT_TASK + " WHERE c.BCOMP_TYPE='2' ORDER BY t.CREATE_DATETIME DESC,t.BCOMP_INDEX ASC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY", TASK_MAPPER);
+        List<TaskSummary> recent = jdbc.query(SELECT_TASK + " WHERE " + VISIBLE_TASK + " ORDER BY t.CREATE_DATETIME DESC,t.BCOMP_INDEX ASC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY", TASK_MAPPER);
         return new DashboardSummary(serviceStatus, running, completed, differences,
             LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME), recent);
     }

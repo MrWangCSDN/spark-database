@@ -9,7 +9,12 @@ export const task = {
   file1FailureCount: null, file2FailureCount: null, readMode: '1'
 }
 
+export const batch = { batchId: '20260922-001', taskBusinessDate: '20260922', verifyBusinessDate: '20260922', createdAt: '20260922120000', sourceBatchId: null, totalCount: 200, waitingCount: 49, runningCount: 1, consistentCount: 142, differenceCount: 6, failedCount: 2, otherCount: 0, endedCount: 150 }
 export const handlers = [
+  http.get('/api/batches/runtime', () => HttpResponse.json({ tasksEnabled: true, concurrency: 1, maxBatchSize: 5000 })),
+  http.get('/api/batches', () => HttpResponse.json({ items: [batch], page: 0, size: 20, total: 1 })),
+  http.get('/api/batches/:batchId/tasks', () => HttpResponse.json({ items: [task], page: 0, size: 20, total: 1 })),
+  http.get('/api/batches/:batchId', () => HttpResponse.json(batch)),
   http.get('/api/tasks', () => HttpResponse.json({ items: [task], page: 0, size: 20, total: 1 })),
   http.post('/api/tasks', async () => HttpResponse.json(task, { status: 201 })),
   http.get('/api/configurations', () => HttpResponse.json({ items: [{ bcompIndex: 8, name: '客户余额核对', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 8, dateMode: '1' }], page: 0, size: 100, total: 1 })),

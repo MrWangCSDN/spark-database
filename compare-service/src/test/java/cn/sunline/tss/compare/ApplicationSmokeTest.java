@@ -42,9 +42,11 @@ class ApplicationSmokeTest {
     }
 
     @Test void servesTheManagementConsoleWithoutCapturingApiRoutes() {
-        ResponseEntity<String> page=http.getForEntity("/tasks",String.class);
-        assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(page.getBody()).contains("<div id=\"root\">");
+        for (String path : new String[]{"/tasks", "/batches", "/batches/new", "/batches/202609220001"}) {
+            ResponseEntity<String> page=http.getForEntity(path,String.class);
+            assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(page.getBody()).contains("<div id=\"root\">");
+        }
         assertThat(http.getForEntity("/api/missing",String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 

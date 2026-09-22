@@ -27,6 +27,10 @@ public class TaskManagementService {
     }
 
     public TaskSummary create(TaskCreateRequest request) {
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> createLocked(request));
+    }
+
+    private TaskSummary createLocked(TaskCreateRequest request) {
         validateRequest(request);
         var config = repository.configurationStatus(request.bcompIndex());
         if (config == null || !config.complete()) {

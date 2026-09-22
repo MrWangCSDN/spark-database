@@ -14,3 +14,7 @@ compare-ui/vite.config.js
 compare-ui/vite.config.d.ts
 
 config/bd.env
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/

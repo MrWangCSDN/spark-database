@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DashboardPage } from './DashboardPage'
 import { renderPage } from '../test/render'
-import { server } from '../test/server'
+import { server, batch } from '../test/server'
 
 const dashboard = {
   serviceStatus: '运行中',
@@ -14,33 +14,21 @@ const dashboard = {
   updatedAt: '20260920120000'
 }
 
-const baseTask = { bcompIndex: 8, configurationName: '客户余额核对', taskBusinessDate: '20260920', taskBatch: '1', timeNode: 'D', createdAt: '20260920120000', startedAt: null, endedAt: null, failureReason: null, file1Count: 20, file2Count: 20, file1SuccessCount: 20, file2SuccessCount: 20, file1FailureCount: 0, file2FailureCount: 0, readMode: '1' }
-const failedTask = { ...baseTask, bcompIndex: 9, configurationName: '失败任务', taskState: '4', taskResult: '1' }
-const differentTask = { ...baseTask, bcompIndex: 10, configurationName: '差异任务', taskState: '3', taskResult: '1' }
-const consistentTask = { ...baseTask, bcompIndex: 11, configurationName: '一致任务', taskState: '3', taskResult: '2' }
-
-test('shows health metrics and only attention-worthy recent tasks', async () => {
-  server.use(http.get('/api/dashboard', () => HttpResponse.json({
-    ...dashboard,
-    runningCount: 2,
-    todayCompletedCount: 12,
-    todayDifferenceCount: 1,
-    recentTasks: [failedTask, differentTask, consistentTask]
-  })))
+test('shows actual scheduler settings and batch results instead of an assumed healthy scheduler', async () => {
+  server.use(http.get('/api/batches/runtime', () => HttpResponse.json({ tasksEnabled: false, concurrency: 2, maxBatchSize: 5000 })))
   renderPage(<DashboardPage />)
-
-  expect(await screen.findByRole('heading', { name: '运行总览' })).toBeVisible()
-  await screen.findAllByText(failedTask.configurationName)
-  expect(screen.getByLabelText('核心运行指标')).toHaveTextContent('12')
-  expect(screen.getByRole('region', { name: '需要关注' })).toHaveTextContent(failedTask.configurationName)
-  expect(screen.getByRole('region', { name: '需要关注' })).not.toHaveTextContent(consistentTask.configurationName)
+  expect(screen.getByRole('heading', { name: '核对工作台' })).toBeVisible()
+  expect(await screen.findByText('未启用')).toBeVisible()
+  expect(screen.getByLabelText('任务调度状态')).toHaveTextContent('执行并发2')
+  expect(await screen.findByRole('link', { name: batch.batchId })).toHaveAttribute('href', `/batches/${batch.batchId}`)
+  expect(screen.getByRole('region', { name: '最近批次' })).toHaveTextContent('执行失败')
+  expect(screen.getByRole('link', { name: '发起全部比对' })).toHaveAttribute('href', '/batches/new')
 })
 
-test('shows a stable error state when dashboard loading fails', async () => {
-  server.use(http.get('/api/dashboard', () => HttpResponse.json({}, { status: 500 })))
+test('shows a stable error state when scheduler settings cannot be read', async () => {
+  server.use(http.get('/api/batches/runtime', () => HttpResponse.json({}, { status: 500 })))
   renderPage(<DashboardPage />)
-
-  expect(await screen.findByRole('alert')).toHaveTextContent('总览加载失败')
+  expect(await screen.findByRole('alert')).toHaveTextContent('调度状态读取失败')
 })
 
 test('refreshes the configuration cache once and disables the action while loading', async () => {

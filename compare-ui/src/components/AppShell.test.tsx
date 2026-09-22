@@ -13,7 +13,8 @@ test('groups management and configuration navigation', () => {
 
   expect(screen.getByText('管理视图')).toBeVisible()
   expect(screen.getByText('基础配置')).toBeVisible()
-  expect(screen.getByRole('link', { name: /运行总览/ })).toHaveAttribute('href', '/')
+  expect(screen.getByRole('link', { name: /核对工作台/ })).toHaveAttribute('href', '/')
+  expect(screen.getByRole('link', { name: /核对批次/ })).toHaveAttribute('href', '/batches')
   expect(screen.getByRole('link', { name: /数据库连接/ })).toHaveAttribute('href', '/databases')
 })
 

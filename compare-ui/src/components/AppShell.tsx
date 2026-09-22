@@ -5,7 +5,7 @@ import { ThemeSwitcher } from './ThemeSwitcher'
 type NavigationIcon = 'overview' | 'tasks' | 'config' | 'database'
 
 const navigation: Array<{ label: string; items: Array<{ to: string; label: string; icon: NavigationIcon }> }> = [
-  { label: '管理视图', items: [{ to: '/', label: '运行总览', icon: 'overview' }, { to: '/tasks', label: '核对任务', icon: 'tasks' }] },
+  { label: '管理视图', items: [{ to: '/', label: '核对工作台', icon: 'overview' }, { to: '/batches', label: '核对批次', icon: 'tasks' }] },
   { label: '基础配置', items: [{ to: '/configurations', label: '核对配置', icon: 'config' }, { to: '/databases', label: '数据库连接', icon: 'database' }] }
 ]
 

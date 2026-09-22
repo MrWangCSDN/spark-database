@@ -8,7 +8,12 @@ public class ConfigStore implements cn.sunline.tss.compare.configuration.CacheRe
     private final LegacyRepository repository;
     private volatile Snapshot snapshot = new Snapshot(Map.of(), Map.of());
     public ConfigStore(LegacyRepository repository) { this.repository = repository; }
-    @Override public void reload() { snapshot = repository.loadConfiguration(); }
+    @Override public void reload() {
+        ControlPlaneLock.call(() -> {
+            snapshot = repository.loadConfiguration();
+            return null;
+        });
+    }
     public Snapshot snapshot() { return snapshot; }
     public record Snapshot(Map<Long,String> names, Map<Long,Database> databases) {}
 }

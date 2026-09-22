@@ -39,7 +39,8 @@ test('manager reviews dashboard, filters failed tasks, and opens a result', asyn
   const failed = { ...task, taskState: '4', taskResult: '1', failureReason: 'Spark 任务退出' }
   await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
     const url = new URL(route.request().url())
-    if (url.pathname === '/api/dashboard') return route.fulfill({ json: { serviceStatus: '运行中', runningCount: 0, todayCompletedCount: 6, todayDifferenceCount: 1, updatedAt: '20260921100000', recentTasks: [failed] } })
+    if (url.pathname === '/api/batches/runtime') return route.fulfill({ json: { tasksEnabled: true, concurrency: 1, maxBatchSize: 5000 } })
+    if (url.pathname === '/api/batches') return route.fulfill({ json: { items: [], page: 0, size: 5, total: 0 } })
     if (url.pathname === '/api/tasks') return route.fulfill({ json: { items: [failed], page: 0, size: 20, total: 1 } })
     if (url.pathname === '/api/tasks/8/20260920/1/D') return route.fulfill({ json: failed })
     if (url.pathname.endsWith('/differences')) return route.fulfill({ json: { items: [], page: 0, size: 20, total: 0 } })
@@ -47,8 +48,8 @@ test('manager reviews dashboard, filters failed tasks, and opens a result', asyn
   })
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: '运行总览' })).toBeVisible()
-  await page.getByRole('link', { name: /核对任务/ }).click()
+  await expect(page.getByRole('heading', { name: '核对工作台' })).toBeVisible()
+  await page.getByRole('link', { name: /查看全部单表任务/ }).click()
   await page.getByLabel('任务状态').selectOption('4')
   await page.getByRole('button', { name: '查询' }).click()
   await expect(page).toHaveURL(/taskState=4/)
@@ -101,4 +102,39 @@ test('tests and saves a database connection, then retries cache refresh', async 
   await page.getByRole('button', { name: '重试刷新缓存' }).click()
   await expect(page.getByText('新连接已加载到当前服务实例。')).toBeVisible()
   expect(refreshCalls).toBe(2)
+})
+
+
+test('previews all configurations, excludes a blocked item, creates a batch and opens the task', async ({ page }) => {
+  const requests: Record<string, unknown>[] = []
+  const summary = { batchId: '20260922-001', taskBusinessDate: '20260922', verifyBusinessDate: '20260922', createdAt: '20260922120000', sourceBatchId: null, totalCount: 1, waitingCount: 1, runningCount: 0, consistentCount: 0, differenceCount: 0, failedCount: 0, otherCount: 0, endedCount: 0 }
+  const ready = { bcompIndex: 8, configurationName: '客户余额核对', module: 'CORE', timeNode: 'D', verifyBusinessDate: '20260922', ready: true, issueCode: null, issueMessage: null, configurationChanged: false }
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/batches/preview') {
+      const body = route.request().postDataJSON(); requests.push(body)
+      const excluded = body.excludedIds?.includes(9)
+      const items = excluded ? [ready] : [ready, { ...ready, bcompIndex: 9, configurationName: '未配置主键表', ready: false, issueCode: 'BUSINESS_KEY_REQUIRED', issueMessage: '请设置核对主键' }]
+      return route.fulfill({ json: { fingerprint: 'preview-1', taskBusinessDate: '20260922', verifyBusinessDate: '20260922', totalCount: items.length, readyCount: 1, blockedCount: excluded ? 0 : 1, changedCount: 0, items } })
+    }
+    if (url.pathname === '/api/batches' && route.request().method() === 'POST') { requests.push(route.request().postDataJSON()); return route.fulfill({ json: summary, status: 201 }) }
+    if (url.pathname === '/api/batches/20260922-001') return route.fulfill({ json: summary })
+    if (url.pathname === '/api/batches/20260922-001/tasks') return route.fulfill({ json: { items: [task], page: 0, size: 20, total: 1 } })
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+  })
+  await page.goto('/batches/new')
+  await page.getByLabel('任务业务日期').fill('20260922')
+  await page.getByRole('button', { name: '预检配置' }).click()
+  await expect(page.getByRole('button', { name: '确认发起' })).toBeDisabled()
+  await page.getByRole('checkbox', { name: '排除 未配置主键表' }).check()
+  await page.getByRole('button', { name: '排除勾选的 1 项并重新预检' }).click()
+  await expect(page.getByRole('button', { name: '确认发起' })).toBeEnabled()
+  await page.getByRole('button', { name: '确认发起' }).click()
+  await expect(page).toHaveURL('/batches/20260922-001')
+  await expect(page.getByRole('heading', { name: '批次详情' })).toBeVisible()
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '0')
+  expect(requests[0]).toEqual({ scope: 'ALL', taskBusinessDate: '20260922', verifyBusinessDate: '20260922' })
+  expect(requests[2]).toMatchObject({ excludedIds: [9], previewFingerprint: 'preview-1' })
+  expect(requests[2].requestId).toBeTruthy()
+  await expect(page.getByRole('link', { name: '查看任务' })).toHaveAttribute('href', '/tasks/8/20260920/1/D?batchId=20260922-001')
 })

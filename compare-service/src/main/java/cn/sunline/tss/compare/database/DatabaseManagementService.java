@@ -15,6 +15,10 @@ public class DatabaseManagementService {
     }
 
     public DatabaseSummary create(DatabaseSaveRequest request){
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> createLocked(request));
+    }
+
+    private DatabaseSummary createLocked(DatabaseSaveRequest request) {
         validate(request,true);
         JdbcCurrentSchemaPolicy.requireValid(request.url(),request.driver());
         if(repository.find(request.databaseId())!=null)throw ApiException.conflict("DATABASE_ID_CONFLICT","数据库连接编号已存在");
@@ -24,6 +28,10 @@ public class DatabaseManagementService {
     }
 
     public DatabaseSummary update(long id,DatabaseSaveRequest request){
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> updateLocked(id, request));
+    }
+
+    private DatabaseSummary updateLocked(long id,DatabaseSaveRequest request) {
         if(id!=request.databaseId())throw ApiException.badRequest("DATABASE_ID_MISMATCH","路径编号与请求编号不一致");
         validate(request,false);
         JdbcCurrentSchemaPolicy.requireValid(request.url(),request.driver());

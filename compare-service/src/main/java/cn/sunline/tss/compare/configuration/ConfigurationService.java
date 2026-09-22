@@ -29,17 +29,29 @@ public class ConfigurationService {
     public ConfigurationDetail find(long index){var value=repository.find(index);if(value==null)throw ApiException.notFound("CONFIGURATION_NOT_FOUND","核对配置不存在");return value;}
 
     public ConfigurationSaveResult create(ConfigurationCommand command){
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> createLocked(command));
+    }
+
+    private ConfigurationSaveResult createLocked(ConfigurationCommand command) {
         validate(command);
         if(repository.find(command.basic().bcompIndex())!=null)throw ApiException.conflict("CONFIGURATION_ID_CONFLICT","核对配置编号已存在");
         repository.insert(command);return finish(command.basic().bcompIndex());
     }
     public ConfigurationSaveResult update(long index,ConfigurationCommand command){
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> updateLocked(index, command));
+    }
+
+    private ConfigurationSaveResult updateLocked(long index,ConfigurationCommand command) {
         if(command==null||command.basic()==null||index!=command.basic().bcompIndex())throw ApiException.badRequest("CONFIGURATION_ID_MISMATCH","路径编号与请求编号不一致");
         validate(command);find(index);
         if(repository.inUse(index))throw ApiException.conflict("CONFIGURATION_IN_USE","核对配置正被等待或运行任务引用");
         repository.update(command);return finish(index);
     }
     public ConfigurationSaveResult copy(long index,CopyConfigurationRequest request){
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> copyLocked(index, request));
+    }
+
+    private ConfigurationSaveResult copyLocked(long index,CopyConfigurationRequest request) {
         var source=find(index);
         if(request==null||request.newIndex()<=0||blank(request.newName()))throw ApiException.badRequest("INVALID_COPY_REQUEST","新编号和名称不能为空");
         var b=source.basic();
@@ -49,6 +61,10 @@ public class ConfigurationService {
     public ConfigurationOptions options(){return repository.options();}
 
     public ConfigScriptImportResult importScript(MultipartFile file){
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> importScriptLocked(file));
+    }
+
+    private ConfigScriptImportResult importScriptLocked(MultipartFile file) {
         if(file==null||file.isEmpty())throw ApiException.badRequest("CONFIG_SCRIPT_REQUIRED","请选择或粘贴 Axon 配置脚本");
         if(file.getSize()>maxImportBytes)throw ApiException.payloadTooLarge("CONFIG_SCRIPT_TOO_LARGE","配置脚本超过允许的大小");
         AxonConfigScriptParser.ParseResult counts;

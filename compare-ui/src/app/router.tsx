@@ -1,6 +1,9 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { DashboardPage } from '../pages/DashboardPage'
+import { BatchesPage } from '../pages/BatchesPage'
+import { BatchCreatePage } from '../pages/BatchCreatePage'
+import { BatchDetailPage } from '../pages/BatchDetailPage'
 import { TasksPage } from '../pages/TasksPage'
 import { TaskDetailPage } from '../pages/TaskDetailPage'
 import { ConfigurationsPage } from '../pages/ConfigurationsPage'
@@ -10,6 +13,9 @@ import { DatabasesPage } from '../pages/DatabasesPage'
 
 export const router = createBrowserRouter([{ path: '/', element: <AppShell />, children: [
   { index: true, element: <DashboardPage /> },
+  { path: 'batches', element: <BatchesPage /> },
+  { path: 'batches/new', element: <BatchCreatePage /> },
+  { path: 'batches/:batchId', element: <BatchDetailPage /> },
   { path: 'tasks', element: <TasksPage /> },
   { path: 'tasks/:index/:date/:batch/:timeNode', element: <TaskDetailPage /> },
   { path: 'configurations', element: <ConfigurationsPage /> },

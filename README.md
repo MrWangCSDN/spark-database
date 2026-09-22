@@ -8,7 +8,7 @@
 
 ## 不变的兼容边界
 
-通过 `sql/create_bcomp_new.sql` 新建九张空业务表；旧表及数据保留。枚举、忽略值和差异字段依赖同样使用独占新表：
+通过 `sql/create_bcomp_new.sql` 新建十一张空表（九张核对业务表、两张批次表）；旧表及数据保留。枚举、忽略值和差异字段依赖同样使用独占新表：
 
 | 运行时表 | 用途 |
 |---|---|
@@ -17,6 +17,7 @@
 | TSS_BCOMP_TABLE_SQL_NEW | 两侧SQL和数据库ID |
 | TSS_BCOMP_FIELD_NEW | 字段位置、类型、业务键、分区列、忽略规则 |
 | TSS_BCOMP_ENUM_NEW / TSS_IGNORE_VALUE_NEW | 枚举映射与忽略值 |
+| TSS_BCOMP_BATCH_NEW / TSS_BCOMP_BATCH_ITEM_NEW | 批次请求身份、任务清单与名称快照 |
 | TSS_BCOMP_TASK_NEW | 原任务状态与统计 |
 | TSS_BCOMP_DTL_NEW | 原差异明细 |
 | TSS_BCOMP_DIFFFIELD_NEW | 原作业保留的预编译查询依赖 |
@@ -180,7 +181,7 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 
 ## 九张业务表隔离部署
 
-执行 `sql/create_bcomp_new.sql` 创建九张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
+执行 `sql/create_bcomp_new.sql` 创建十一张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
 
 停止 bd 并等待在途 Spark 作业结束后，同步替换 service 和 Spark 两个 JAR。在数据库连接页面重新维护连接（Axon 脚本使用 ID 1 和 2），从 Axon 选择“新版本（_new 表）”下载并导入配置，再创建小任务测试。旧版本 SQL 不可导入本版 bd。枚举、忽略值及差异字段表均使用 `_NEW` 表；规则表初始为空，启用规则前需维护相应数据。
 
@@ -196,3 +197,16 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 启停脚本共用 `bin/runtime.sh` 加载 `config/bd.env`。启动前检查 JDK 17、两个 JAR、配置及驱动类；重复启动不会拉起第二个实例。根 start.sh 最长等待 BD_START_WAIT_SECONDS（默认30秒）的本次启动完成日志，超时保留进程与 PID 供排查。停止脚本只对带本目录标识的服务 PID 发送 SIGTERM；不会停止 Spark Master/Worker 或旧核对服务。旧版脚本启动的进程需要先人工核对后停止，再使用新版脚本。日志按每次启动归档。
 
 openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，厂商 JAR 放 drivers/。可执行 `bin/check-driver.sh` 离线验证驱动类和 URL 是否匹配；该检查不连接数据库。Spark 对 jdbc:opengauss 注册游标事务设置，在 fetchsize>0 时关闭自动提交。真实驱动、数据库版本及集群连通性仍需现场验证。
+
+
+## 批量核对工作台（2026-09-22）
+
+四个入口为核对工作台、核对批次、核对配置、数据库连接。导入 Axon 后选择“发起全部比对”，统一填写业务日期，先预检再创建批次。也可在配置列表跨页勾选部分配置。全部范围由后端取全量，不受列表分页限制，单批最多 5000 项。
+
+批次任务整体进入等待队列，按 `BD_TASK_CONCURRENCY` 对应的 Worker 并发执行；默认 1，不会同时拉起全部 Spark 作业。`BD_TASKS_ENABLED=false` 时可创建等待任务，工作台会显示调度未启用。预检存在问题时先修复或明确排除，再重新校验；不会静默跳过。双击或网络重试会复用同一请求身份，避免重复创建。
+
+批次详情按等待、运行、一致、有差异、执行失败分别展示。进度按已结束任务数计算。重新发起失败项会建立新批次，保留原业务日期、每项核验日期和时点，使用当前配置，配置变化时提示；不把有差异当作执行失败，不覆盖旧任务与明细。批次保存任务名称和配置摘要，后续重新导入不影响历史列表。
+
+**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用 `sql/create_bcomp_new.sql` 一次建齐十一张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
+
+现有单表任务仍在 `/tasks` 查询；批次页面只展示本功能创建的批次。控制面变更在单个服务实例内串行化，当前部署按单实例运行；不要同时通过另一实例或外部 SQL 修改正在使用的配置。

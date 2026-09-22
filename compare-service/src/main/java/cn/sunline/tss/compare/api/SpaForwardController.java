@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 public class SpaForwardController {
     @GetMapping({
         "/", "/tasks", "/tasks/{index}/{date}/{batch}/{timeNode}",
+        "/batches", "/batches/{batchId}",
         "/configurations", "/configurations/{index}", "/databases"
     })
     String forwardManagementRoutes() {

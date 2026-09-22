@@ -12,6 +12,7 @@ export function ConfigurationImportPage() {
   const [script, setScript] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [validation, setValidation] = useState('')
+  const [cacheReady, setCacheReady] = useState(false)
   const client = useQueryClient()
   const mutation = useMutation({
     mutationFn: async () => {
@@ -20,12 +21,13 @@ export function ConfigurationImportPage() {
       body.append('file', source)
       return api<ConfigScriptImportResult>('/api/configurations/import', { method: 'POST', body })
     },
-    onSuccess: () => client.invalidateQueries({ queryKey: ['configurations'] }),
+    onSuccess: result => { setCacheReady(result.saved && result.cacheRefreshed); client.invalidateQueries({ queryKey: ['configurations'] }) },
     onError: (error: Error) => setValidation(error.message)
   })
   const submit = (event: FormEvent) => {
     event.preventDefault()
     mutation.reset()
+    setCacheReady(false)
     if (!file && !script.trim()) { setValidation('请选择 SQL 文件或粘贴脚本'); return }
     if (!confirmed) { setValidation('请确认脚本会整体替换三张配置表'); return }
     setValidation('')
@@ -36,22 +38,26 @@ export function ConfigurationImportPage() {
     if (selected) setScript('')
     setValidation('')
     mutation.reset()
+    setCacheReady(false)
   }
   const paste = (value: string) => {
     setScript(value)
     if (value) setFile(null)
     setValidation('')
     mutation.reset()
+    setCacheReady(false)
   }
   const result = mutation.data
   return <form className="page import-page" onSubmit={submit}>
     <Link className="back-link" to="/configurations">← 返回核对配置</Link>
-    <div className="page-heading"><div><span className="eyebrow">AXON CONFIG IMPORT</span><h1>导入 Axon 配置</h1><p>执行 Axon-Link 已生成的三表 SQL，完成后再到任务页创建 Spark 核对任务。</p></div><button className="button primary" disabled={mutation.isPending}>{mutation.isPending ? '导入中…' : '执行导入'}</button></div>
+    <div className="page-heading"><div><span className="eyebrow">AXON CONFIG IMPORT</span><h1>导入 Axon 配置</h1><p>执行 Axon-Link 已生成的三表 SQL，导入并刷新缓存后，可直接发起整批比对。</p></div><button className="button primary" disabled={mutation.isPending}>{mutation.isPending ? '导入中…' : '执行导入'}</button></div>
 
     <div className="notice warning" role="note"><div><strong>该操作会整体替换核对配置</strong><p>脚本会清空并重建 TSS_BCOMP_CONF_NEW、TSS_BCOMP_FIELD_NEW、TSS_BCOMP_TABLE_SQL_NEW。存在等待或运行任务时后端会拒绝执行。</p></div></div>
-    <SaveWarning message={result?.warning} savedTitle="配置已导入" successMessage="新配置已加载到当前服务实例。" />
+    <SaveWarning message={result && !result.cacheRefreshed ? result.warning || '配置已导入，但缓存刷新失败，请重试。' : null} savedTitle="配置已导入" successMessage="新配置已加载到当前服务实例。" onRefreshed={() => setCacheReady(true)} />
     {validation && <div className="notice error" role="alert">{validation}</div>}
     {result && <section className="import-result" aria-label="导入结果"><div><span>配置</span><strong>已导入 {result.configurationCount} 个配置</strong></div><div><span>字段</span><strong>{result.fieldCount} 个字段</strong></div><div><span>两侧 SQL</span><strong>{result.tableSqlCount} 条</strong></div></section>}
+
+    {result?.saved && cacheReady && <div className="import-next-actions"><span>配置已导入，缓存已刷新。</span><Link className="button primary" to="/batches/new">发起全部比对</Link><Link className="button ghost" to="/configurations">查看配置</Link></div>}
 
     <section className="section-block import-source" aria-label="脚本来源"><div className="section-heading"><div><h2>选择脚本来源</h2><p>上传 Axon 下载的 .sql 文件，或直接粘贴完整内容；两种方式只会提交其中一种。</p></div></div>
       <div className="import-source-grid">
