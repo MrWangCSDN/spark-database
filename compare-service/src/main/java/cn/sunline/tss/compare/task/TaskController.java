@@ -38,6 +38,12 @@ public class TaskController {
         return service.exact(index, date, batch, timeNode);
     }
 
+    @GetMapping("/{index}/{date}/{batch}/{timeNode}/database-context")
+    TaskDatabaseContext databaseContext(@PathVariable long index, @PathVariable String date,
+                                        @PathVariable String batch, @PathVariable String timeNode) {
+        return service.databaseContext(index, date, batch, timeNode);
+    }
+
     @GetMapping("/{index}/{date}/{batch}/{timeNode}/differences")
     PageResult<DifferenceSummary> differences(@PathVariable long index, @PathVariable String date,
                                                @PathVariable String batch, @PathVariable String timeNode,

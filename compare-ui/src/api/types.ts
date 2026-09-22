@@ -40,3 +40,8 @@ export interface BatchSummary {
   failedCount: number; otherCount: number; endedCount: number
 }
 export interface BatchRuntime { tasksEnabled: boolean; concurrency: number; maxBatchSize: number }
+
+export interface TaskDatabaseContext {
+  originDatabaseId: number | null; originDatabaseName: string | null;
+  destinationDatabaseId: number | null; destinationDatabaseName: string | null
+}

@@ -12,5 +12,3 @@ export function StatusBadge({ value, kind = 'state', taskState }: { value?: stri
     : (kind === 'state' ? states : results)[value ?? ''] ?? [value || '未知', '·']
   return <span className={`status status-${kind}-${taskState === '4' && kind === 'result' ? 'failed' : value ?? 'unknown'}`}><span aria-hidden>{icon}</span>{label}</span>
 }
-
-export const resultLabel = (value: string) => ({ '1': '仅旧侧存在', '2': '仅新侧存在', '3': '值不一致' }[value] ?? `结果 ${value}`)

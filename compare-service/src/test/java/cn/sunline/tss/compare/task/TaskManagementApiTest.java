@@ -170,6 +170,31 @@ class TaskManagementApiTest {
             .andExpect(jsonPath("$.recentTasks.length()").value(1));
     }
 
+    @Test
+    void resolvesDatabaseNamesFromActualSqlReferencesWithoutCredentials() throws Exception {
+        mvc.perform(post("/api/tasks").contentType(APPLICATION_JSON).content(taskRequest()))
+            .andExpect(status().isCreated());
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_NAME='sit' where DATABASE_ID=1");
+        jdbc.update("update TSS_BCOMP_DATABASE_CONFIG_NEW set DATABASE_NAME='uat' where DATABASE_ID=2");
+        jdbc.update("update TSS_BCOMP_TABLE_SQL_NEW set ORIG_DATABASE_ID=2,DEST_DATABASE_ID=1");
+        mvc.perform(get("/api/tasks/22/20260920/001/EOD/database-context"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.originDatabaseId").value(2))
+            .andExpect(jsonPath("$.originDatabaseName").value("uat"))
+            .andExpect(jsonPath("$.destinationDatabaseId").value(1))
+            .andExpect(jsonPath("$.destinationDatabaseName").value("sit"))
+            .andExpect(jsonPath("$.length()").value(4));
+        jdbc.update("delete from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=2");
+        mvc.perform(get("/api/tasks/22/20260920/001/EOD/database-context"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.originDatabaseId").value(2))
+            .andExpect(jsonPath("$.originDatabaseName").isEmpty());
+        jdbc.update("delete from TSS_BCOMP_TABLE_SQL_NEW");
+        mvc.perform(get("/api/tasks/22/20260920/001/EOD/database-context"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.originDatabaseId").isEmpty());
+        mvc.perform(get("/api/tasks/22/20260920/001/OTHER/database-context"))
+            .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("TASK_NOT_FOUND"));
+    }
+
     private static String taskRequest() {
         return """
             {"bcompIndex":22,"taskBusinessDate":"20260920","verifyBusinessDate":"20260919","taskBatch":"001","timeNode":"EOD"}

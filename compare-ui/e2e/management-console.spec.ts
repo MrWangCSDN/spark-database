@@ -11,10 +11,11 @@ test('creates a task and inspects its differences', async ({ page }) => {
   let created = false
   await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
     const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/database-context')) return route.fulfill({ json: { originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' } })
     if (url.pathname === '/api/configurations') return route.fulfill({ json: { items: [{ bcompIndex: 8, name: '客户余额核对', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 8, dateMode: '1' }], page: 0, size: 100, total: 1 } })
     if (url.pathname === '/api/tasks' && route.request().method() === 'POST') { created = true; return route.fulfill({ status: 201, json: task }) }
     if (url.pathname === '/api/tasks') return route.fulfill({ json: { items: [task], page: 0, size: 20, total: 1 } })
-    if (url.pathname.endsWith('/differences')) return route.fulfill({ json: { items: [{ businessKey: 'C001', oldContent: '100.00|2026-09-20', newContent: '101.00|2026-09-20', lineResult: '3', reason: '字段值不一致' }], page: 0, size: 20, total: 1 } })
+    if (url.pathname.endsWith('/differences')) return route.fulfill({ json: { items: [{ businessKey: 'C001', oldContent: '100.00|2026-09-20', newContent: '101.00|2026-09-20', lineResult: '4', reason: '字段值不一致' }], page: 0, size: 20, total: 1 } })
     if (url.pathname === '/api/tasks/8/20260920/1/D') return route.fulfill({ json: { ...task, taskState: '3', taskResult: '2', endedAt: '20260920123000', file1Count: 20, file2Count: 20 } })
     return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
   })
@@ -39,6 +40,7 @@ test('manager reviews dashboard, filters failed tasks, and opens a result', asyn
   const failed = { ...task, taskState: '4', taskResult: '1', failureReason: 'Spark 任务退出' }
   await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
     const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/database-context')) return route.fulfill({ json: { originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' } })
     if (url.pathname === '/api/batches/runtime') return route.fulfill({ json: { tasksEnabled: true, concurrency: 1, maxBatchSize: 5000 } })
     if (url.pathname === '/api/batches') return route.fulfill({ json: { items: [], page: 0, size: 5, total: 0 } })
     if (url.pathname === '/api/tasks') return route.fulfill({ json: { items: [failed], page: 0, size: 20, total: 1 } })
@@ -65,6 +67,7 @@ test('tests and saves a database connection, then retries cache refresh', async 
   let refreshCalls = 0
   await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
     const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/database-context')) return route.fulfill({ json: { originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' } })
     if (url.pathname === '/api/databases' && route.request().method() === 'GET') {
       return route.fulfill({ json: { items: [], page: 0, size: 100, total: 0 } })
     }
@@ -111,6 +114,7 @@ test('previews all configurations, excludes a blocked item, creates a batch and 
   const ready = { bcompIndex: 8, configurationName: '客户余额核对', module: 'CORE', timeNode: 'D', verifyBusinessDate: '20260922', ready: true, issueCode: null, issueMessage: null, configurationChanged: false }
   await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
     const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/database-context')) return route.fulfill({ json: { originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' } })
     if (url.pathname === '/api/batches/preview') {
       const body = route.request().postDataJSON(); requests.push(body)
       const excluded = body.excludedIds?.includes(9)
@@ -137,4 +141,27 @@ test('previews all configurations, excludes a blocked item, creates a batch and 
   expect(requests[2]).toMatchObject({ excludedIds: [9], previewFingerprint: 'preview-1' })
   expect(requests[2].requestId).toBeTruthy()
   await expect(page.getByRole('link', { name: '查看任务' })).toHaveAttribute('href', '/tasks/8/20260920/1/D?batchId=20260922-001')
+})
+
+test('shows sit and uat names with the correct missing direction', async ({ page }) => {
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/database-context')) return route.fulfill({ json: { originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' } })
+    if (path.endsWith('/differences')) return route.fulfill({ json: { items: [
+      { businessKey: 'AC001', oldContent: null, newContent: 'AC001|+|100.00', lineResult: '2', reason: '生产少' },
+      { businessKey: 'AC002', oldContent: 'AC002|+|200.00', newContent: null, lineResult: '3', reason: '信创少' },
+      { businessKey: 'AC003', oldContent: 'AC003|+|300.00', newContent: 'AC003|+|301.00', lineResult: '4', reason: 'AMOUNT 字段值不一致' }
+    ], page: 0, size: 20, total: 3 } })
+    return route.fulfill({ json: { ...task, taskState: '3', taskResult: '1', file1Count: 7, file2Count: 1729516, file1FailureCount: 1729516, file2FailureCount: 7 } })
+  })
+  await page.goto('/tasks/8/20260920/1/D')
+  await expect(page.getByText('仅 uat 存在', { exact: true })).toBeVisible()
+  await expect(page.getByText('sit 缺少记录', { exact: true })).toBeVisible()
+  await expect(page.getByText('仅 sit 存在', { exact: true })).toBeVisible()
+  await expect(page.getByText('uat 缺少记录', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '查看两侧内容' }).first().click()
+  await expect(page.getByText('sit 内容', { exact: true })).toBeVisible()
+  await expect(page.getByText('uat 内容', { exact: true })).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(/旧侧|新侧|生产少|信创少/)
+  await page.screenshot({ path: '../output/playwright/result-database-names.png', fullPage: true })
 })

@@ -17,3 +17,11 @@ test('labels configuration editor sections for direct navigation', async () => {
   expect(screen.getByRole('region', { name: '两侧查询' })).toBeVisible()
   expect(screen.getByRole('region', { name: '字段规则' })).toBeVisible()
 })
+
+test('names SQL and field positions after the selected database', async () => {
+  renderPage(<ConfigurationEditorPage />, '/configurations/8')
+  expect(await screen.findByLabelText('核心旧库 SQL')).toHaveValue('select * from old_customer')
+  expect(screen.getByLabelText('核心旧库 字段位置 1')).toHaveValue(1)
+  expect(screen.getByLabelText('数据库 #2 SQL')).toHaveValue('select * from new_customer')
+  expect(document.body.textContent).not.toMatch(/旧侧|新侧/)
+})

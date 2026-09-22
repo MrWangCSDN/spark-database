@@ -64,6 +64,11 @@ public class TaskManagementService {
         return task;
     }
 
+    public TaskDatabaseContext databaseContext(long index, String date, String batch, String timeNode) {
+        exact(index, date, batch, timeNode);
+        return repository.databaseContext(index);
+    }
+
     public PageResult<DifferenceSummary> differences(long index, String date, String batch,
                                                       String result, String key, int page, int size) {
         validatePage(page, size);

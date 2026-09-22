@@ -67,6 +67,18 @@ public class TaskManagementRepository {
         return rows.size() == 1 ? rows.get(0) : null;
     }
 
+    TaskDatabaseContext databaseContext(long index) {
+        List<TaskDatabaseContext> rows = jdbc.query("""
+            SELECT s.ORIG_DATABASE_ID,o.DATABASE_NAME,s.DEST_DATABASE_ID,d.DATABASE_NAME
+            FROM TSS_BCOMP_TABLE_SQL_NEW s
+            LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW o ON o.DATABASE_ID=s.ORIG_DATABASE_ID
+            LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d ON d.DATABASE_ID=s.DEST_DATABASE_ID
+            WHERE s.BCOMP_INDEX=?
+            """, (rs, n) -> new TaskDatabaseContext(nullableLong(rs, 1), rs.getString(2),
+                nullableLong(rs, 3), rs.getString(4)), index);
+        return rows.size() == 1 ? rows.get(0) : new TaskDatabaseContext(null, null, null, null);
+    }
+
     boolean identityExists(long index, String date, String batch) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=?",
             Integer.class, index, date, batch);
