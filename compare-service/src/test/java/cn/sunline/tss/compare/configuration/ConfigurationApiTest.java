@@ -86,6 +86,37 @@ class ConfigurationApiTest {
             .replace("'配置''说明','2','1','3','1');", "'配置''说明','2','1','3','1',"+count+","+strategy+");");
     }
 
+    String sampleScript(String limit) {
+        return hashScript("16", "'HASH'")
+            .replace("bcomp_shard_strategy)", "bcomp_shard_strategy,bcomp_sample_limit)")
+            .replace("16,'HASH');", "16,'HASH',"+limit+");");
+    }
+
+    @Test void importsSampleLimitsAndKeepsLegacyFallbackNullable() throws Exception {
+        for (int limit : new int[]{0,37,1000,10000}) {
+            mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(sampleScript(""+limit))))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("select BCOMP_SAMPLE_LIMIT from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",Integer.class)).isEqualTo(limit);
+        }
+        for (String legacy : new String[]{axonScript("OLD"),hashScript("16","'HASH'")}) {
+            mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(legacy))).andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("select BCOMP_SAMPLE_LIMIT from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",Integer.class)).isNull();
+        }
+    }
+
+    @Test void invalidSampleLimitsRollBackReplacementAndDoNotRefresh() throws Exception {
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
+            .andExpect(status().isCreated());
+        AtomicInteger reloads=new AtomicInteger();
+        for (String limit : new String[]{"-1","10001","1.5","NULL","'1000'","1e3","999999999999999999999"}) {
+            mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import").file(scriptFile(sampleScript(limit))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        }
+        assertThat(reloads).hasValue(0);
+        assertThat(jdbc.queryForObject("select BCOMP_NAME from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+        assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(1);
+    }
+
     @Test void hashOnlyDefaultsCountAndDiscardsPartitionFlags() throws Exception {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
             .content(valid(31,"hash").replace("\"partitionNum\":16", "\"partitionNum\":null")))
@@ -127,6 +158,7 @@ class ConfigurationApiTest {
             .andExpect(jsonPath("$.configurationCount").value(1))
             .andExpect(jsonPath("$.fieldCount").value(3));
         assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1", Integer.class)).isEqualTo(16);
+        assertThat(jdbc.queryForObject("select BCOMP_SAMPLE_LIMIT from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1", Integer.class)).isEqualTo(37);
         assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD_NEW where BCOMP_INDEX=1 and FIELD_INDEX_FLAG='1'", Integer.class)).isEqualTo(2);
     }
 

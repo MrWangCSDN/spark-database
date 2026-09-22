@@ -115,10 +115,9 @@ public class SparkHandlerTable {
                 .config("spark.sql.adaptive.advisoryPartitionSizeInBytes", "64m")
                 .getOrCreate();
 
-        int limit=Integer.parseInt(sc.conf().get("spark.compare.detailLimit","1000"));
-        new ResultAggregate(limit); // validate before reading source tables
         Class.forName(args[tssDataSourceDriver]);
         try (Connection connectionOut=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+            int limit=readSampleLimit(connectionOut,Long.parseLong(args[bcompIndex]),sc.conf().get("spark.compare.detailLimit","1000"));
             DailyResultPublisher.Context resultContext=DailyResultPublisher.context(connectionOut,Long.parseLong(args[bcompIndex]));
             //获取tssBcompField字段信息（需在获取数据源配置之前，因为分区列从field表中读取）
             List<Row> tssBcompFieldDataRows = getTssBcompFieldData(sc,args);
@@ -449,6 +448,24 @@ public class SparkHandlerTable {
             return true;
         }
         return false;
+    }
+
+    /** A per-table zero is explicit; only NULL uses the current global fallback. */
+    static int readSampleLimit(Connection connection, long configurationIndex, String globalLimit) throws SQLException {
+        try (PreparedStatement ps=connection.prepareStatement("SELECT BCOMP_SAMPLE_LIMIT FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?")) {
+            ps.setLong(1,configurationIndex);
+            try(ResultSet rs=ps.executeQuery()) {
+                if(!rs.next()) throw new IllegalArgumentException("核对配置不存在");
+                Object value=rs.getObject(1);
+                try {
+                    int limit=new java.math.BigDecimal(value==null?globalLimit:value.toString()).intValueExact();
+                    if(limit<0 || limit>10000) throw new IllegalArgumentException("差异明细上限必须在0..10000之间");
+                    return limit;
+                } catch (NumberFormatException | ArithmeticException error) {
+                    throw new IllegalArgumentException("差异明细上限必须为0..10000整数",error);
+                }
+            }
+        }
     }
 
     /** HASH is the only read strategy. A missing count explicitly means one partition. */

@@ -25,11 +25,21 @@ class SparkCompatibilityTest {
     @Test void hashOneUsesSingleRead() throws Exception {
         compareTables("HASH", 1);
     }
+    @Test void explicitZeroOverridesGlobalThousandAndKeepsFullCounts() throws Exception {
+        compareTables("HASH", 1, 0, 1000);
+    }
+    @Test void perTableCapOverridesSmallerGlobalCap() throws Exception {
+        compareTables("HASH", 2, 2, 1);
+    }
     private void compareTables(String strategy, int partitions) throws Exception {
+        compareTables(strategy, partitions, null, 1);
+    }
+    private void compareTables(String strategy, int partitions, Integer tableLimit, int globalLimit) throws Exception {
         String url="jdbc:h2:mem:spark_"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try(var c=DriverManager.getConnection(url,"sa",""); var s=c.createStatement()) {
             org.h2.tools.RunScript.execute(c,java.nio.file.Files.newBufferedReader(java.nio.file.Path.of("../sql/create_bcomp_new.sql")));
             s.execute("insert into TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_PARTITION_NUM,BCOMP_SHARD_STRATEGY) values(1,'TEST',"+partitions+",'"+strategy+"')");
+            if(tableLimit!=null) s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_SAMPLE_LIMIT="+tableLimit+" where BCOMP_INDEX=1");
             s.execute("insert into TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME) values(1,'sit'),(2,'uat')");
             s.execute("insert into TSS_BCOMP_TABLE_SQL_NEW(BCOMP_INDEX,ORIG_DATABASE_ID,DEST_DATABASE_ID) values(1,1,2)");
             s.execute("insert into TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_PARTITION_FLAG,FIELD_ENUM_INDEX,FIELD_IGNORE_VALUE,FIELD_IGNORE_FLAG) values(1,'ID','1',1,1,'1','1',null,null,'0'),(1,'VAL','1',2,2,'0','0',null,null,'0')");
@@ -53,7 +63,7 @@ class SparkCompatibilityTest {
             // 由原main创建SparkSession，保证原Kryo/内存配置也参与验证。
             var properties=Map.of("spark.master","local[2]", "spark.ui.enabled","false",
                 "spark.driver.host","127.0.0.1", "spark.driver.bindAddress","127.0.0.1",
-                "spark.compare.detailLimit","1", "spark.default.parallelism","2", "spark.sql.shuffle.partitions","2");
+                "spark.compare.detailLimit",Integer.toString(globalLimit), "spark.default.parallelism","2", "spark.sql.shuffle.partitions","2");
             var previous=new HashMap<String,String>();
             properties.forEach((key,value) -> { previous.put(key,System.getProperty(key)); System.setProperty(key,value); });
             List<Integer> jdbcStagePartitions=new CopyOnWriteArrayList<>();
@@ -85,9 +95,11 @@ class SparkCompatibilityTest {
                 assertNotNull(r.getString("DETAIL_JSON"));
                 assertEquals("20260919",r.getString("RESULT_DATE"));
             }}
-            assertEquals(Map.of("4",1,"2",1,"3",1),codes);
+            int resolved=tableLimit==null?globalLimit:tableLimit;
+            int samples=Math.min(2,resolved);
+            assertEquals(samples==0?Map.of():Map.of("4",samples,"2",samples,"3",samples),codes);
             try(var r=s.executeQuery("select * from TSS_BCOMP_RESULT_NEW")) {
-                assertTrue(r.next());assertEquals(6,r.getLong("ORIGIN_COUNT"));assertEquals(6,r.getLong("DESTINATION_COUNT"));
+                assertTrue(r.next());assertEquals(resolved,r.getInt("DETAIL_LIMIT"));assertEquals(6,r.getLong("ORIGIN_COUNT"));assertEquals(6,r.getLong("DESTINATION_COUNT"));
                 assertEquals(2,r.getLong("ONLY_ORIGIN_COUNT"));assertEquals(2,r.getLong("ONLY_DESTINATION_COUNT"));assertEquals(2,r.getLong("DIFFERENT_COUNT"));
             }
         }

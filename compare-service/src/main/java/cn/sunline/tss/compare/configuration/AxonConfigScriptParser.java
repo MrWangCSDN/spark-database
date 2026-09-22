@@ -15,6 +15,7 @@ final class AxonConfigScriptParser {
     private static final Pattern INSERT = Pattern.compile("(?is)^INSERT\\s+INTO\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*VALUES\\s*(.+)$");
     private static final List<String> CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state");
     private static final List<String> HASH_CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state","bcomp_partition_num","bcomp_shard_strategy");
+    private static final List<String> SAMPLE_CONF_COLUMNS = java.util.stream.Stream.concat(HASH_CONF_COLUMNS.stream(), java.util.stream.Stream.of("bcomp_sample_limit")).toList();
     private static final List<String> FIELD_COLUMNS = List.of("bcomp_index","field_name","field_type","field_memo","field_old_index","field_new_index","field_index_flag","field_enum_flag");
     private static final List<String> SQL_COLUMNS = List.of("bcomp_index","orig_sql","orig_database_id","dest_sql","dest_database_id");
 
@@ -101,8 +102,9 @@ final class AxonConfigScriptParser {
         List<String> columns = Pattern.compile("\\s*,\\s*").splitAsStream(matcher.group(2).trim()).map(value -> value.toLowerCase(Locale.ROOT)).toList();
         List<String> expected;
         int phase;
-        boolean hashConfiguration = table.equals("tss_bcomp_conf_new") && columns.equals(HASH_CONF_COLUMNS);
-        if (table.equals("tss_bcomp_conf_new")) { expected=hashConfiguration ? HASH_CONF_COLUMNS : CONF_COLUMNS; phase=0; }
+        boolean sampleConfiguration = table.equals("tss_bcomp_conf_new") && columns.equals(SAMPLE_CONF_COLUMNS);
+        boolean hashConfiguration = sampleConfiguration || (table.equals("tss_bcomp_conf_new") && columns.equals(HASH_CONF_COLUMNS));
+        if (table.equals("tss_bcomp_conf_new")) { expected=sampleConfiguration ? SAMPLE_CONF_COLUMNS : hashConfiguration ? HASH_CONF_COLUMNS : CONF_COLUMNS; phase=0; }
         else if (table.equals("tss_bcomp_field_new")) { expected=FIELD_COLUMNS; phase=1; }
         else if (table.equals("tss_bcomp_table_sql_new")) { expected=SQL_COLUMNS; phase=2; }
         else { invalid(); return; }
@@ -138,6 +140,7 @@ final class AxonConfigScriptParser {
                 }
                 if (hashConfiguration && columns == 8) validatePartitionCount(values.substring(tokenStart, position));
                 if (hashConfiguration && columns == 9 && !"'HASH'".equalsIgnoreCase(values.substring(tokenStart, position))) invalid();
+                if (hashConfiguration && columns == 10) validateSampleLimit(values.substring(tokenStart, position));
                 columns++;
                 position=skip(values,position);
                 if(position>=values.length()) invalid();
@@ -157,6 +160,15 @@ final class AxonConfigScriptParser {
         try {
             int count = Integer.parseInt(token);
             if (count < 1 || count > 256) invalid();
+        } catch (NumberFormatException exception) {
+            invalid();
+        }
+    }
+
+    private void validateSampleLimit(String token) {
+        try {
+            int limit = Integer.parseInt(token);
+            if (limit < 0 || limit > 10000) invalid();
         } catch (NumberFormatException exception) {
             invalid();
         }
