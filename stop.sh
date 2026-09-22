@@ -1,38 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-app_home="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-pid_file="$app_home/bd.pid"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/runtime.sh"
+bd_lock
 timeout_seconds="${BD_STOP_TIMEOUT_SECONDS:-120}"
-
-if [[ ! -f "$pid_file" ]]; then
-  echo "未找到PID文件，服务可能没有启动：$pid_file" >&2
-  exit 1
-fi
-
+bd_positive BD_STOP_TIMEOUT_SECONDS "$timeout_seconds"
+[[ -f "$pid_file" ]] || { echo '服务未运行（没有 bd.pid）。'; exit 0; }
 service_pid="$(cat "$pid_file")"
-if [[ ! "$service_pid" =~ ^[0-9]+$ ]]; then
-  echo "PID文件内容无效：$pid_file" >&2
-  exit 1
-fi
-
-if ! kill -0 "$service_pid" 2>/dev/null; then
-  rm -f "$pid_file"
-  echo "服务进程已经停止，已清理失效的PID文件。"
-  exit 0
-fi
-
+[[ "$service_pid" =~ ^[0-9]+$ ]] && (( service_pid > 1 )) || { echo 'bd.pid 内容无效，未发送停止信号。' >&2; exit 1; }
+if ! bd_alive "$service_pid"; then rm -f "$pid_file"; echo '服务已停止，已清理失效 PID。'; exit 0; fi
+bd_owned "$service_pid" || { echo 'PID 不是本目录启动的 bd 进程，拒绝停止；请人工核对旧版进程。' >&2; exit 1; }
 echo "正在停止服务，PID=$service_pid"
-kill "$service_pid"
-
+kill -TERM "$service_pid"
 deadline=$((SECONDS + timeout_seconds))
-while kill -0 "$service_pid" 2>/dev/null; do
+while bd_alive "$service_pid"; do
   if (( SECONDS >= deadline )); then
-    echo "等待 ${timeout_seconds} 秒后服务仍未退出，请检查Spark作业和日志；未执行强制终止。" >&2
-    exit 1
+    echo "等待 ${timeout_seconds} 秒后仍未退出；保留 PID，请检查在途 Spark 作业和日志。" >&2; exit 1
   fi
   sleep 1
 done
-
 rm -f "$pid_file"
-echo "服务已停止。"
+echo '服务已停止。'

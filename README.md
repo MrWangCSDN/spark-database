@@ -189,3 +189,10 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 已执行前一版六表脚本的环境，只需补执行 `sql/add_bcomp_rule_tables_new.sql`；新环境执行完整九表脚本 `sql/create_bcomp_new.sql`。差异字段表仅保留当前代码查询依赖的 BCOMP_INDEX 列，不复制旧系统未使用的字段。
 
 发布包包含 `config/bd.env` 占位模板与 `config/application-local.properties`。启动前替换 CHANGE_ME、SPARK_HOME 和 SPARK_MASTER，并检查 Spark 资源参数。打包脚本始终从 `.example` 生成配置，不复制开发机的真实凭据。
+
+
+## 启停与 openGauss 驱动检查
+
+启停脚本共用 `bin/runtime.sh` 加载 `config/bd.env`。启动前检查 JDK 17、两个 JAR、配置及驱动类；重复启动不会拉起第二个实例。根 start.sh 最长等待 BD_START_WAIT_SECONDS（默认30秒）的本次启动完成日志，超时保留进程与 PID 供排查。停止脚本只对带本目录标识的服务 PID 发送 SIGTERM；不会停止 Spark Master/Worker 或旧核对服务。旧版脚本启动的进程需要先人工核对后停止，再使用新版脚本。日志按每次启动归档。
+
+openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，厂商 JAR 放 drivers/。可执行 `bin/check-driver.sh` 离线验证驱动类和 URL 是否匹配；该检查不连接数据库。Spark 对 jdbc:opengauss 注册游标事务设置，在 fetchsize>0 时关闭自动提交。真实驱动、数据库版本及集群连通性仍需现场验证。

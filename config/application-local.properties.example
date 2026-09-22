@@ -21,24 +21,24 @@ app_resource=${COMPARE_HOME}/jobs/compare-spark-1.0.0-SNAPSHOT.jar
 # 由 bin/start.sh 自动枚举 drivers/*.jar；也可填写逗号分隔的驱动绝对路径。
 compare.spark-jars=${COMPARE_SPARK_JARS:}
 spark.submit.deployMode=client
-spark.log.flag=false
+spark.log.flag=${SPARK_LOG_FLAG:true}
 # 如运行在 YARN，配置原 hadoop_conf_dir。
 # hadoop_conf_dir=/opt/hadoop/etc/hadoop
 
 # 以下资源值来自原 application-spark.properties，并非容量建议。
-spark.cores.max=144
-spark.executor.cores=4
-spark.executor.memory=10g
-spark.executor.memoryOverhead=2g
-spark.executor.instances=36
-spark.default.parallelism=500
-spark.driver.maxResultSize=6g
-spark.sql.shuffle.partitions=2000
-spark.driver.memory=6g
-spark.network.timeout=300
+spark.cores.max=${SPARK_CORES_MAX:4}
+spark.executor.cores=${SPARK_EXECUTOR_CORES:2}
+spark.executor.memory=${SPARK_EXECUTOR_MEMORY:2g}
+spark.executor.memoryOverhead=${SPARK_EXECUTOR_MEMORY_OVERHEAD:2g}
+spark.executor.instances=${SPARK_EXECUTOR_INSTANCES:2}
+spark.default.parallelism=${SPARK_DEFAULT_PARALLELISM:100}
+spark.driver.maxResultSize=${SPARK_DRIVER_MAX_RESULT_SIZE:1g}
+spark.sql.shuffle.partitions=${SPARK_SQL_SHUFFLE_PARTITIONS:2000}
+spark.driver.memory=${SPARK_DRIVER_MEMORY:1g}
+spark.network.timeout=${SPARK_NETWORK_TIMEOUT:300}
 
-tssveritask.executor.thread.enable=true
-tssveritask.executor.thread.maxPoolSize=1
+tssveritask.executor.thread.enable=${BD_TASKS_ENABLED:true}
+tssveritask.executor.thread.maxPoolSize=${BD_TASK_CONCURRENCY:1}
 tssveritask.executor.thread.awaitTerminationSeconds=60
 compare.poll-interval-ms=2000
 compare.refresh-timeout-seconds=300
@@ -48,4 +48,4 @@ compare.database-test-timeout-seconds=10
 compare.database-test-max-concurrency=4
 # 0表示不限制作业运行时间，符合原来一直等待的行为。
 compare.spark-timeout-seconds=0
-server.port=8080
+server.port=${SERVER_PORT:8899}

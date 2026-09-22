@@ -121,6 +121,7 @@ public class SparkHandlerTable {
     public static void SparkRun(String[] args) throws Exception {
         log.info("spark任务开始执行");
 
+        OpenGaussJdbcDialect.register();
         SparkSession sc = SparkSession.builder()
                 .appName(args[0])
                 // 基础内存优化：启用Kryo序列化（比默认Java序列化更省内存）
