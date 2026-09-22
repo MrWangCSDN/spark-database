@@ -186,7 +186,6 @@ public class BatchService {
         var oldPositions = new HashSet<Long>();
         var newPositions = new HashSet<Long>();
         int keys = 0;
-        int partitions = 0;
         for (var field : configuration.fields()) {
             long oldPosition = positiveNumber(field.get("FIELD_OLD_INDEX"));
             long newPosition = positiveNumber(field.get("FIELD_NEW_INDEX"));
@@ -195,10 +194,11 @@ public class BatchService {
                 return new Issue("INVALID_FIELD", "字段名称、类型或位置不合法，两侧字段位置必须各自唯一");
             }
             if ("1".equals(field.get("FIELD_INDEX_FLAG"))) keys++;
-            if ("1".equals(field.get("FIELD_PARTITION_FLAG"))) partitions++;
         }
         if (keys == 0) return new Issue("BUSINESS_KEY_REQUIRED", "至少需要配置一个主键或业务核对键字段");
-        if (partitions > 1) return new Issue("INVALID_FIELD", "配置包含多个分区字段，请修正字段规则");
+        String count = configuration.value("BCOMP_PARTITION_NUM");
+        if (count != null && (positiveNumber(count) < 1 || positiveNumber(count) > 256))
+            return new Issue("INVALID_PARTITION_COUNT", "主键 HASH 分区数必须为 1～256");
         return null;
     }
 

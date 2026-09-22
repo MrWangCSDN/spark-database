@@ -66,3 +66,8 @@ td strong { display: block; }.row-link { color: var(--accent); font-weight: 750;
 .table-checkbox { width: 16px; height: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }.selection-toolbar { display: flex; align-items: center; gap: 18px; min-height: 48px; font-size: 12px; }.selection-toolbar .button { margin-left: auto; }.text-button:disabled { color: var(--muted); opacity: .6; cursor: default; }
 .import-next-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding-bottom: 15px; }.import-next-actions > span { margin-right: auto; font-size: 13px; color: var(--success); }
 @media (max-width: 800px) { .runtime-summary { grid-template-columns: 1fr 1fr; gap: 20px; }.runtime-summary p { grid-column: 1 / -1; }.batch-completion { align-items: flex-start; flex-direction: column; }.batch-completion .batch-progress { width: 100%; }.batch-fields { grid-template-columns: 1fr; }.batch-scope .row-link { margin-left: 0; }.workspace-maintenance { flex-wrap: wrap; }.batch-form-actions, .batch-submit { flex-wrap: wrap; } }
+
+.daily-date-form { display:flex; align-items:end; gap:16px; margin-bottom:24px; flex-wrap:wrap; }
+.daily-date-form label { display:grid; gap:8px; }
+
+.daily-results-page th, .daily-result-page th { text-transform:none; }

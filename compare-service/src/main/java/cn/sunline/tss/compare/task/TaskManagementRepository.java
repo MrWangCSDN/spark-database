@@ -28,7 +28,7 @@ public class TaskManagementRepository {
         + " LEFT JOIN TSS_BCOMP_BATCH_ITEM_NEW bi ON bi.BATCH_ID=b.BATCH_ID AND bi.BCOMP_INDEX=t.BCOMP_INDEX ";
     private static final String VISIBLE_TASK = "(c.BCOMP_TYPE='2' OR c.BCOMP_INDEX IS NULL OR bi.BATCH_ID IS NOT NULL)";
     private static final String SELECT_TASK = "SELECT t.BCOMP_INDEX," + TASK_NAME
-        + ",t.TASK_BUSI_DATE,t.VERIFY_BUSINESS_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.CREATE_DATETIME,t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE" + TASK_FROM;
+        + ",t.TASK_BUSI_DATE,t.VERIFY_BUSINESS_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.CREATE_DATETIME,t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE,t.RESULT_DATE" + TASK_FROM;
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
@@ -94,7 +94,7 @@ public class TaskManagementRepository {
                 request.taskBatch(), created, request.timeNode());
             return new TaskSummary(request.bcompIndex(), configurationName, request.taskBusinessDate(),
                 emptyToNull(request.verifyBusinessDate()), request.taskBatch(), request.timeNode(), created,
-                null, null, "1", null, null, null, null, null, null, null, null, null);
+                null, null, "1", null, null, null, null, null, null, null, null, null, null);
         });
     }
 
@@ -166,7 +166,7 @@ public class TaskManagementRepository {
         return new TaskSummary(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
             rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9),
             rs.getString(10), rs.getString(11), rs.getString(12), nullableLong(rs, 13), nullableLong(rs, 14),
-            nullableLong(rs, 15), nullableLong(rs, 16), nullableLong(rs, 17), nullableLong(rs, 18), rs.getString(19));
+            nullableLong(rs, 15), nullableLong(rs, 16), nullableLong(rs, 17), nullableLong(rs, 18), rs.getString(19), rs.getString(20));
     }
 
     private static Long nullableLong(ResultSet rs, int column) throws SQLException {

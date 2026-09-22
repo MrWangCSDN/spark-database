@@ -17,10 +17,17 @@ export function TaskDetailPage() {
   const parts = useLocation().pathname.split('/').filter(Boolean), identity = parts.slice(1, 5).map(value => encodeURIComponent(decodeURIComponent(value))).join('/')
   const [page, setPage] = useState(0), [expanded, setExpanded] = useState<string | null>(null), [tab, setTab] = useState<DetailTab>(searchParams.get('tab') === 'execution' ? 'execution' : 'differences')
   const task = useQuery({ queryKey: ['task', identity], queryFn: () => api<TaskSummary>(`/api/tasks/${identity}`) })
-  const differences = useQuery({ queryKey: ['differences', identity, page], queryFn: () => api<PageResult<DifferenceSummary>>(query(`/api/tasks/${identity}/differences`, { page, size: 20 })) })
-  const context = useQuery({ queryKey: ['task-database-context', identity], queryFn: () => api<TaskDatabaseContext>(`/api/tasks/${identity}/database-context`) })
+  const differences = useQuery({ queryKey: ['differences', identity, page], queryFn: () => api<PageResult<DifferenceSummary>>(query(`/api/tasks/${identity}/differences`, { page, size: 20 })), enabled: task.isSuccess && !task.data?.resultDate })
+  const context = useQuery({ queryKey: ['task-database-context', identity], queryFn: () => api<TaskDatabaseContext>(`/api/tasks/${identity}/database-context`), enabled: task.isSuccess && !task.data?.resultDate })
   const names = databaseLabels(context.data)
   const item = task.data
+  if (item?.resultDate) return <div className="page"><Link className="back-link" to={sourceBatch ? `/batches/${encodeURIComponent(sourceBatch)}` : '/tasks'}>← 返回任务列表</Link>
+    <div className="page-heading compact"><div><h1>{item.configurationName}</h1><p>核对业务日期 {item.resultDate} · 批次 {item.taskBatch}</p></div><StatusBadge value={item.taskState} /></div>
+    <div className="notice"><div><strong>该任务采用每日汇总和限额明细</strong><p>同一核对日期仅保留最近一次成功执行的明细。重新执行失败时保留上一次成功结果；首次执行尚未成功时没有可查看的结果。</p></div></div>
+    {item.failureReason && <div className="notice error" role="alert">{item.failureReason}</div>}
+    <Link className="button primary" to={`/results/${item.bcompIndex}/${item.resultDate}?sourceBatch=${encodeURIComponent(item.taskBatch)}&sourceDate=${item.taskBusinessDate}`}>查看该日期最新成功结果</Link>
+    <dl className="execution-grid"><div><dt>创建时间</dt><dd>{formatTime(item.createdAt)}</dd></div><div><dt>开始时间</dt><dd>{formatTime(item.startedAt)}</dd></div><div><dt>结束时间</dt><dd>{formatTime(item.endedAt)}</dd></div><div><dt>读取策略</dt><dd>{item.readMode || '—'}</dd></div></dl>
+  </div>
   return <div className="page"><Link className="back-link" to={sourceBatch ? `/batches/${encodeURIComponent(sourceBatch)}` : '/tasks'}>{sourceBatch ? '← 返回核对批次' : '← 返回任务列表'}</Link>
     <div className="page-heading compact"><div><span className="eyebrow">TASK DETAIL</span><h1>{item?.configurationName ?? '任务详情'}</h1><p>{item ? `#${item.bcompIndex} · ${item.taskBusinessDate} · 批次 ${item.taskBatch} · 时点 ${item.timeNode}` : '正在读取任务…'}</p></div>{item && <div className="heading-status"><StatusBadge value={item.taskState} /><StatusBadge value={item.taskResult} kind="result" taskState={item.taskState} /></div>}</div>
     {task.isLoading && <ContentState state="loading" title="正在加载任务详情" />}

@@ -29,7 +29,7 @@ export function DashboardPage() {
       {batches.data?.total === 0 && <ContentState state="empty" title="尚未发起核对批次" description="已有配置可直接发起全部比对，也可在核对配置中勾选部分表。" action={<Link className="button ghost small" to="/configurations">查看核对配置</Link>} />}
       {!!batches.data?.items.length && <BatchTable items={batches.data.items} />}
     </section>
-    <section className="workspace-maintenance"><Link className="row-link" to="/tasks">查看全部单表任务（含历史任务） →</Link><button className="button ghost small" disabled={cacheRefresh.state === 'loading'} onClick={refreshCache}>{buttonLabel}</button></section>
+    <section className="workspace-maintenance"><Link className="row-link" to="/results">查看每日全量汇总与差异样本 →</Link><Link className="row-link" to="/tasks">查看全部单表任务（含历史任务） →</Link><button className="button ghost small" disabled={cacheRefresh.state === 'loading'} onClick={refreshCache}>{buttonLabel}</button></section>
     {cacheRefresh.state !== 'idle' && cacheRefresh.state !== 'loading' && <div className={`notice ${cacheRefresh.state === 'failed' ? 'error' : ''}`} role="status"><div><strong>{cacheRefresh.state === 'success' ? '缓存已刷新' : '缓存刷新失败'}</strong><p>{cacheRefresh.message}</p></div></div>}
   </div>
 }

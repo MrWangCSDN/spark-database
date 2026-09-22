@@ -140,11 +140,11 @@ public class BatchRepository {
         var items = jdbc.query("""
             SELECT i.BCOMP_INDEX,i.CONFIGURATION_NAME,b.TASK_BUSI_DATE,i.VERIFY_BUSINESS_DATE,b.BATCH_ID,i.TIME_NODE,
               COALESCE(t.CREATE_DATETIME,b.CREATED_AT),t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,
-              t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE
+              t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE,t.RESULT_DATE
             """ + ITEM_JOIN + where + " ORDER BY i.BCOMP_INDEX OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
             (rs, n) -> new TaskSummary(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
                 rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12),
-                nullableLong(rs, 13), nullableLong(rs, 14), nullableLong(rs, 15), nullableLong(rs, 16), nullableLong(rs, 17), nullableLong(rs, 18), rs.getString(19)),
+                nullableLong(rs, 13), nullableLong(rs, 14), nullableLong(rs, 15), nullableLong(rs, 16), nullableLong(rs, 17), nullableLong(rs, 18), rs.getString(19), rs.getString(20)),
             batchId, (long) page * size, size);
         return new PageResult<>(items, page, size, total == null ? 0 : total);
     }

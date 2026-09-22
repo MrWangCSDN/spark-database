@@ -163,5 +163,29 @@ test('shows sit and uat names with the correct missing direction', async ({ page
   await expect(page.getByText('sit 内容', { exact: true })).toBeVisible()
   await expect(page.getByText('uat 内容', { exact: true })).toBeVisible()
   await expect(page.locator('body')).not.toContainText(/旧侧|新侧|生产少|信创少/)
-  await page.screenshot({ path: '../output/playwright/result-database-names.png', fullPage: true })
+  await page.screenshot({ path: '../output/playwright/result-database-names.png', fullPage: true, animations: 'disabled' })
+})
+
+test('daily results show full counts and bounded named field samples', async ({ page }) => {
+  const summary = { bcompIndex: 1, resultDate: '20260920', runId: 'v1', taskBusiDate: '20260921', taskBatch: 'b1', timeNode: 'D', configurationName: 'customer', originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat', originCount: 1000005, destinationCount: 2000005, matchedCount: 3, onlyOriginCount: 1000000, onlyDestinationCount: 2000000, differentCount: 2, detailLimit: 1000, originSamples: 1000, destinationSamples: 1000, differentSamples: 2, publishedAt: '20260922120000', detailsExpired: '0' }
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/results') return route.fulfill({ json: { results: { items: [summary], total: 1, page: 0, size: 20 }, connections: [{ ...summary, objectCount: 1 }] } })
+    if (url.pathname.endsWith('/differences')) {
+      expect(url.searchParams.get('version')).toBe('v1')
+      return route.fulfill({ json: { summary, items: [{ businessKey: '["C001"]', detail: { fields: [{ name: 'BALANCE', originValue: '100.00', destinationValue: '120.00' }, { name: 'STATUS', originValue: '正常', destinationValue: '冻结' }], truncated: false } }], page: 0, size: 20, total: url.searchParams.get('type') === '4' ? 2 : 1000 } })
+    }
+    return route.fulfill({ json: summary })
+  })
+  await page.goto('/results?date=20260920')
+  await expect(page.getByText('1,000,005', { exact: true })).toBeVisible()
+  await expect(page.getByText('sit 总量', { exact: true })).toBeVisible()
+  await page.screenshot({ path: '../output/playwright/daily-results.png', fullPage: true, animations: 'disabled' })
+  await page.getByRole('link', { name: '查看样本' }).click()
+  await expect(page.getByText(/实际差异 1,000,000 条 · 已保存明细 1,000 条/)).toBeVisible()
+  await page.getByRole('tab', { name: /主键相同、字段不同/ }).click()
+  await page.getByRole('button', { name: '查看字段' }).click()
+  await expect(page.getByText('sit 的值', { exact: true })).toBeVisible()
+  await expect(page.getByText('冻结', { exact: true })).toBeVisible()
+  await page.screenshot({ path: '../output/playwright/daily-result-fields.png', fullPage: true, animations: 'disabled' })
 })

@@ -42,7 +42,7 @@ class ApplicationSmokeTest {
     }
 
     @Test void servesTheManagementConsoleWithoutCapturingApiRoutes() {
-        for (String path : new String[]{"/tasks", "/batches", "/batches/new", "/batches/202609220001"}) {
+        for (String path : new String[]{"/results", "/results/1/20260920", "/tasks", "/batches", "/batches/new", "/batches/202609220001"}) {
             ResponseEntity<String> page=http.getForEntity(path,String.class);
             assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(page.getBody()).contains("<div id=\"root\">");

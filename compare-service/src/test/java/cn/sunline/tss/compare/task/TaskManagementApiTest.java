@@ -140,8 +140,8 @@ class TaskManagementApiTest {
     @Test
     void listsAndLooksUpExactTaskAndPagesDifferences() throws Exception {
         jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,CREATE_DATETIME,TASK_STATE,TASK_RESULT,FILE1_ACOUNT,FILE2_ACOUNT) values(22,'20260920','001','EOD','20260920160000','3','1',3,3)");
-        jdbc.update("insert into TSS_BCOMP_DTL_NEW values(22,'20260920','001','[A]','A|+|old','A|+|new','4','VAL')");
-        jdbc.update("insert into TSS_BCOMP_DTL_NEW values(22,'20260920','001','[B]','', 'B|+|new','2','')");
+        jdbc.update("insert into TSS_BCOMP_DTL_NEW(BCOMP_INDEX,TASK_DATE,TASK_BATCH,COMP_INDEX_STR,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON) values(22,'20260920','001','[A]','A|+|old','A|+|new','4','VAL')");
+        jdbc.update("insert into TSS_BCOMP_DTL_NEW(BCOMP_INDEX,TASK_DATE,TASK_BATCH,COMP_INDEX_STR,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON) values(22,'20260920','001','[B]','', 'B|+|new','2','')");
 
         mvc.perform(get("/api/tasks").param("size", "20").param("sort", "createdAt,desc"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))

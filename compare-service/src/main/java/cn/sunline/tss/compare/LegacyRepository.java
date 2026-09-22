@@ -23,11 +23,12 @@ public class LegacyRepository {
         jdbc = new JdbcTemplate(source); jdbc.setQueryTimeout(queryTimeout);
         transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
     }
-    public Task claim() {
+    public synchronized Task claim() {
         return transaction.execute(status -> {
             // 原Spark最终更新不区分时点，故不能领取三元身份有多行的任务。
             String sql = "SELECT t.BCOMP_INDEX,t.TASK_BUSI_DATE,t.TASK_BATCH,t.BCOMP_TIME_NODE,t.VERIFY_BUSINESS_DATE "
                 + "FROM TSS_BCOMP_TASK_NEW t WHERE t.TASK_STATE='1' "
+                + "AND NOT EXISTS(SELECT 1 FROM TSS_BCOMP_TASK_NEW r WHERE r.BCOMP_INDEX=t.BCOMP_INDEX AND r.TASK_STATE='2' AND COALESCE(NULLIF(r.VERIFY_BUSINESS_DATE,''),r.TASK_BUSI_DATE)=COALESCE(NULLIF(t.VERIFY_BUSINESS_DATE,''),t.TASK_BUSI_DATE)) "
                 + "AND EXISTS (SELECT 1 FROM TSS_BCOMP_CONF_NEW c WHERE c.BCOMP_INDEX=t.BCOMP_INDEX AND c.BCOMP_TYPE='2') "
                 + "AND (SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW d WHERE d.BCOMP_INDEX=t.BCOMP_INDEX "
                 + "AND d.TASK_BUSI_DATE=t.TASK_BUSI_DATE AND d.TASK_BATCH=t.TASK_BATCH)=1 ORDER BY t.BCOMP_INDEX";
@@ -36,7 +37,7 @@ public class LegacyRepository {
             }, (rs, n) -> task(rs));
             if (tasks.isEmpty()) return null;
             Task task = tasks.get(0);
-            int changed = jdbc.update("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='2',BEGIN_DATETIME=? WHERE " + IDENTITY + " AND TASK_STATE='1'",
+            int changed = jdbc.update("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='2',RESULT_DATE=COALESCE(NULLIF(VERIFY_BUSINESS_DATE,''),TASK_BUSI_DATE),BEGIN_DATETIME=? WHERE " + IDENTITY + " AND TASK_STATE='1'",
                 now(), task.index(), task.date(), task.batch());
             if (changed > 1) throw new IllegalStateException("任务身份不唯一，领取已回滚");
             return changed == 1 ? task : null;

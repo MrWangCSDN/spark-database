@@ -47,6 +47,12 @@ class LegacyRepositoryTest {
         assertThat(repository.claim()).isNull();
         assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).containsOnly("1");
     }
+    @Test void sameComparisonDateIsSerializedAcrossDifferentTaskDatesAndBatches() {
+        task(2,"A");
+        jdbc.update("insert into TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,VERIFY_BUSINESS_DATE,TASK_STATE) values(2,'20260921','second','A','20260919','1')");
+        var first=repository.claim();assertThat(first).isNotNull();assertThat(repository.claim()).isNull();
+        repository.fail(first,"test");assertThat(repository.claim()).isNotNull();
+    }
     @Test void failureOnlyChangesOwnedRunningTask() {
         task(1, "A"); task(2, "A");
         var claimed = repository.claim(); repository.fail(claimed, "提交失败");

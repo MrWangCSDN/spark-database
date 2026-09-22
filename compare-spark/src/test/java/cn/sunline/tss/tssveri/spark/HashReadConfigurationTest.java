@@ -20,35 +20,35 @@ class HashReadConfigurationTest {
             s.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM decimal(30,2), BCOMP_SHARD_STRATEGY varchar(10))");
             s.execute("insert into TSS_BCOMP_CONF_NEW values(1,1,'HASH')");
             String[] args = args(url);
-            for (String invalid : List.of("null","0","-1","257","1.5","999999999999")) {
+            for (String invalid : List.of("0","-1","257","1.5","999999999999")) {
                 s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_PARTITION_NUM="+invalid);
-                assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args,8), invalid);
+                assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args), invalid);
             }
             s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_PARTITION_NUM=1");
-            assertEquals(1,SparkHandlerTable.readShardConf(args,8).partitionNum);
+            assertEquals(1,SparkHandlerTable.readShardConf(args).partitionNum);
             s.execute("alter table TSS_BCOMP_CONF_NEW drop column BCOMP_PARTITION_NUM");
-            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args,8));
+            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args));
         }
     }
-    @Test void legacyDefaultsAndExplicitNtileArePreserved() throws Exception {
+    @Test void missingStrategyAndLegacyStrategyBothUseHashOnly() throws Exception {
         String url="jdbc:h2:mem:legacy_"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try (Connection c=DriverManager.getConnection(url,"sa",""); Statement s=c.createStatement()) {
             s.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM int)");
             s.execute("insert into TSS_BCOMP_CONF_NEW values(1,null)");
-            var legacy=SparkHandlerTable.readShardConf(args(url),8);
-            assertEquals("RANGE",legacy.strategy); assertEquals(8,legacy.partitionNum);
+            var legacy=SparkHandlerTable.readShardConf(args(url));
+            assertEquals(1,legacy.partitionNum);
             s.execute("alter table TSS_BCOMP_CONF_NEW add BCOMP_SHARD_STRATEGY varchar(10) default 'NTILE'");
             s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_PARTITION_NUM=12");
-            var ntile=SparkHandlerTable.readShardConf(args(url),8);
-            assertEquals("NTILE",ntile.strategy); assertEquals(12,ntile.partitionNum);
+            var ntile=SparkHandlerTable.readShardConf(args(url));
+            assertEquals(12,ntile.partitionNum);
         }
     }
-    @Test void unknownStrategiesCannotSelectLegacyReads() throws Exception {
+    @Test void obsoleteStrategyColumnDoesNotControlReads() throws Exception {
         String url="jdbc:h2:mem:strategy_"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try (Connection c=DriverManager.getConnection(url,"sa",""); Statement statement=c.createStatement()) {
             statement.execute("create table TSS_BCOMP_CONF_NEW(BCOMP_INDEX int, BCOMP_PARTITION_NUM int, BCOMP_SHARD_STRATEGY varchar(10))");
             statement.execute("insert into TSS_BCOMP_CONF_NEW values(1,4,'HSAH')");
-            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(args(url),8));
+            assertEquals(4,SparkHandlerTable.readShardConf(args(url)).partitionNum);
         }
     }
     @Test void strategyPermissionFailureCannotMasqueradeAsMissingLegacyColumn() throws Exception {
@@ -58,7 +58,7 @@ class HashReadConfigurationTest {
             statement.execute("insert into TSS_BCOMP_CONF_NEW values(1,4,'HASH')");
             statement.execute("create user RESTRICTED password 'test'");
             String[] restricted=args(url); restricted[2]="RESTRICTED"; restricted[3]="test";
-            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(restricted,8));
+            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.readShardConf(restricted));
         }
     }
     @Test void predicateConnectionsCarryTimeoutsAndMysqlStreamingCursorProperties() throws Exception {
@@ -81,7 +81,7 @@ class HashReadConfigurationTest {
         String[] args=args(url);
         args[14]="(select 7 as \"old id\",'tenant' as \"old tenant\") old_src";
         args[19]="(select 'tenant' as \"new tenant\",7 as \"new id\") new_src";
-        var plan=SparkHandlerTable.resolveReadPlan(args,List.of(key("1","1","2"),key("1","2","1")),new SparkHandlerTable.ShardConf(4,"HASH"));
+        var plan=SparkHandlerTable.resolveReadPlan(args,List.of(key("1","1","2"),key("1","2","1")),new SparkHandlerTable.ShardConf(4));
         assertTrue(plan.oldSide.usePredicates); assertTrue(plan.newSide.usePredicates);
         assertEquals(4,plan.oldSide.predicates.length); assertEquals(4,plan.newSide.predicates.length);
         assertEquals("1000",plan.oldSide.connProps.getProperty("fetchsize"));
@@ -91,13 +91,13 @@ class HashReadConfigurationTest {
         assertTrue(plan.oldSide.predicates[0].contains("\"old tenant\""));
         assertTrue(plan.newSide.predicates[0].contains("\"new id\""));
         assertTrue(plan.newSide.predicates[0].contains("\"new tenant\""));
-        var one=SparkHandlerTable.resolveReadPlan(args,List.of(key("1","1","2")),new SparkHandlerTable.ShardConf(1,"HASH"));
+        var one=SparkHandlerTable.resolveReadPlan(args,List.of(key("1","1","2")),new SparkHandlerTable.ShardConf(1));
         assertFalse(one.oldSide.usePredicates); assertFalse(one.oldSide.options.containsKey("numPartitions"));
     }
     @Test void missingAndFractionalKeysFailBeforeAnySourceConnection() {
         String[] args=args("jdbc:missing");
         for (List<Row> fields : List.of(List.of(key("0","1","1")),List.of(key("1","1.5","1")),List.of(key("1","1","0")))) {
-            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.resolveReadPlan(args,fields,new SparkHandlerTable.ShardConf(1,"HASH")));
+            assertThrows(IllegalArgumentException.class, () -> SparkHandlerTable.resolveReadPlan(args,fields,new SparkHandlerTable.ShardConf(1)));
         }
     }
     @Test void unavailableVendorHashFunctionEscapesLegacySerialFallback() {
@@ -107,7 +107,7 @@ class HashReadConfigurationTest {
         args[14]="(select 1 as ID) src";
         args[19]="(select 1 as ID) src";
         SQLException error=assertThrows(SQLException.class, () -> SparkHandlerTable.resolveReadPlan(args,
-                List.of(key("1","1","1")),new SparkHandlerTable.ShardConf(4,"HASH")));
+                List.of(key("1","1","1")),new SparkHandlerTable.ShardConf(4)));
         assertTrue(error.getMessage().toUpperCase(Locale.ROOT).contains("HASHTEXT"));
     }
     /** Real H2 SQL execution with only vendor metadata overridden, so the advertised function really fails. */

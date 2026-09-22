@@ -6,4 +6,4 @@ public record TaskSummary(long bcompIndex, String configurationName, String task
                           String taskState, String taskResult, String failureReason,
                           Long file1Count, Long file2Count, Long file1SuccessCount,
                           Long file2SuccessCount, Long file1FailureCount, Long file2FailureCount,
-                          String readMode) {}
+                          String readMode, String resultDate) {}

@@ -86,6 +86,19 @@ class ConfigurationApiTest {
             .replace("'配置''说明','2','1','3','1');", "'配置''说明','2','1','3','1',"+count+","+strategy+");");
     }
 
+    @Test void hashOnlyDefaultsCountAndDiscardsPartitionFlags() throws Exception {
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
+            .content(valid(31,"hash").replace("\"partitionNum\":16", "\"partitionNum\":null")))
+            .andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=31",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT FIELD_PARTITION_FLAG FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=31",String.class)).isEqualTo("0");
+        for(int count : new int[]{0,257}) {
+            mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
+                .content(valid(32,"bad").replace("\"partitionNum\":16", "\"partitionNum\":"+count)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_PARTITION_COUNT"));
+        }
+    }
+
     @Test void rejectsOldTableScriptWithoutTouchingOldTables() throws Exception {
         jdbc.execute("CREATE TABLE TSS_BCOMP_CONF (BCOMP_INDEX BIGINT)");
         jdbc.update("INSERT INTO TSS_BCOMP_CONF VALUES (99)");

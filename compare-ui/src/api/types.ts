@@ -4,7 +4,7 @@ export interface TaskSummary {
   taskBatch: string; timeNode: string; createdAt: string; startedAt?: string | null; endedAt?: string | null;
   taskState: string | null; taskResult?: string | null; failureReason?: string | null; file1Count?: number | null;
   file2Count?: number | null; file1SuccessCount?: number | null; file2SuccessCount?: number | null;
-  file1FailureCount?: number | null; file2FailureCount?: number | null; readMode?: string | null
+  file1FailureCount?: number | null; file2FailureCount?: number | null; readMode?: string | null; resultDate?: string | null
 }
 export interface DifferenceSummary { businessKey: string; oldContent: string; newContent: string; lineResult: string; reason: string }
 export interface DashboardSummary { serviceStatus: string; runningCount: number; todayCompletedCount: number; todayDifferenceCount: number; updatedAt: string; recentTasks: TaskSummary[] }
@@ -44,4 +44,19 @@ export interface BatchRuntime { tasksEnabled: boolean; concurrency: number; maxB
 export interface TaskDatabaseContext {
   originDatabaseId: number | null; originDatabaseName: string | null;
   destinationDatabaseId: number | null; destinationDatabaseName: string | null
+}
+
+export interface DailyResult extends TaskDatabaseContext {
+  bcompIndex: number; resultDate: string; runId: string; taskBusiDate: string; taskBatch: string; timeNode: string;
+  configurationName: string; originCount: number; destinationCount: number; matchedCount: number;
+  onlyOriginCount: number; onlyDestinationCount: number; differentCount: number; detailLimit: number;
+  originSamples: number; destinationSamples: number; differentSamples: number; publishedAt: string; detailsExpired: string
+}
+export interface DailyResults {
+  results: PageResult<DailyResult>;
+  connections: Array<TaskDatabaseContext & { objectCount: number }>
+}
+export interface DailySamples {
+  summary: DailyResult; items: Array<{ businessKey: string; detail: { fields: Array<{ name: string; originValue: string | null; destinationValue: string | null }>; truncated: boolean } }>;
+  page: number; size: number; total: number
 }
