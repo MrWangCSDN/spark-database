@@ -49,8 +49,16 @@ bd_check() {
   [[ -z "${SPARK_HOME:-}" || -x "$SPARK_HOME/bin/spark-submit" ]] || {
     echo 'SPARK_HOME 下没有可执行的 bin/spark-submit。' >&2; return 1;
   }
-  if [[ "${TSS_METADATA_PASSWORD:-}" == CHANGE_ME* || "${TSS_METADATA_URL:-}" == *CHANGE_ME* ]]; then
+  if [[ "${TSS_METADATA_PASSWORD:-}" == *CHANGE_ME* || "${TSS_METADATA_URL:-}" == *CHANGE_ME* ]]; then
     echo '请先填写 config/bd.env 的数据库配置占位值。' >&2; return 1
+  fi
+  if [[ -n "${TSS_METADATA_PASSWORD:-}" ]]; then
+    if [[ "${TSS_METADATA_PASSWORD}" != ENC\(*\) ]]; then
+      echo 'TSS_METADATA_PASSWORD 必须使用 Jasypt ENC(...) 密文。' >&2; return 1
+    fi
+    if [[ -z "${JASYPT_ENCRYPTOR_PASSWORD:-}" ]]; then
+      echo '缺少外部注入的 JASYPT_ENCRYPTOR_PASSWORD。' >&2; return 1
+    fi
   fi
   if [[ "${TSS_METADATA_DRIVER:-}" == org.opengauss.Driver && "${TSS_METADATA_URL:-}" != jdbc:opengauss:* ]]; then
     echo 'org.opengauss.Driver 请配套使用 jdbc:opengauss: URL。' >&2; return 1

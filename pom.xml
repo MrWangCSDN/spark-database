@@ -20,5 +20,7 @@
     <spark.version>3.5.3</spark.version>
     <postgresql.version>42.7.12</postgresql.version>
     <gauss-jdbc.version>6.0.0-htrunk8</gauss-jdbc.version>
+    <bes-spring-starter.version>3.x-11.5.0.004</bes-spring-starter.version>
+    <jasypt.version>3.0.5</jasypt.version>
   </properties>
 </project>

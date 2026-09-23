@@ -7,6 +7,13 @@ spring.datasource.dynamic.datasource.frw.username=${TSS_METADATA_USER}
 spring.datasource.dynamic.datasource.frw.password=${TSS_METADATA_PASSWORD}
 spring.datasource.dynamic.datasource.frw.driver-class-name=${TSS_METADATA_DRIVER}
 
+# Jasypt 3.0.5。密钥从进程环境变量 JASYPT_ENCRYPTOR_PASSWORD 注入，不写入本文件。
+jasypt.encryptor.algorithm=PBEWITHHMACSHA512ANDAES_256
+jasypt.encryptor.key-obtention-iterations=1000
+jasypt.encryptor.salt-generator-classname=org.jasypt.salt.RandomSaltGenerator
+jasypt.encryptor.iv-generator-classname=org.jasypt.iv.RandomIvGenerator
+jasypt.encryptor.string-output-type=base64
+
 # 服务任务库和 Spark 结果库必须是同一逻辑库，且 Spark 各节点都能访问。
 spark.datasource.url=${spring.datasource.dynamic.datasource.frw.url}
 spark.datasource.username=${spring.datasource.dynamic.datasource.frw.username}

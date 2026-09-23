@@ -12,7 +12,7 @@
 |---|---|
 | JDK | 17；不要使用本机默认 JDK 25 构建当前 Lombok 版本 |
 | Maven | 3.9 或更高版本 |
-| Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、前端 Maven 插件、JDBC 驱动及全部传递依赖；尤其要预置 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`，该版本不在 Maven Central |
+| Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、Jasypt Starter 3.0.5、BES Lite Starter `bes.springframework.boot:bes-lite-spring-boot-starter:3.x-11.5.0.004`、前端 Maven 插件、JDBC 驱动及全部传递依赖；还要预置 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`。BES 与该 openGauss 版本不在 Maven Central |
 | Node/npm | 使用预编译前端的构建命令时不需要；只有在内网修改并重编前端时，才需 Node `22.14.0`、npm `10.9.2` 和锁定的 npm 包 |
 | 构建资源 | 建议至少 4 CPU、8 GiB 内存和 5 GiB 可用磁盘 |
 
@@ -45,10 +45,18 @@ bin/package.sh -Dskip.installnodenpm=true -Dskip.npm=true
 ```bash
 jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
   | grep '^BOOT-INF/classes/static/index.html$'
+jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
+  | grep 'BOOT-INF/lib/bes-lite-spring-boot-starter-3.x-11.5.0.004.jar'
+if jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar | grep -E 'BOOT-INF/lib/(spring-boot-starter-tomcat|tomcat-embed)'; then
+  echo 'BES 发布 JAR 中不应包含内嵌 Tomcat' >&2
+  exit 1
+fi
 
 tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz
 ```
 
-第一条命令必须找到管理台首页，证明后端源码中的静态页面已进入后端 JAR。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数只跳过 Node/npm，不跳过后端和 Spark 的测试。
+第一条命令必须找到管理台首页，第二条必须找到 BES Starter，且 JAR 不应包含 Tomcat。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数只跳过 Node/npm，不跳过后端和 Spark 的测试。外网 `-Plocal-servlet-tests` 只用于本地测试，不能作为 BES 发布构建。
+
+部署时在 `config/bd.env` 中填写 `TSS_METADATA_PASSWORD='ENC(...)'`。使用 `bin/encrypt-password.sh` 从终端读取元库明文密码并生成密文；加密与运行时都需由外部环境注入同一个 `JASYPT_ENCRYPTOR_PASSWORD`，不要把口令写入源码包或 `bd.env`。启动后检查 BES 的 WebServer 日志和管理台/API 实际可访问；仅通过 Maven 构建不能证明厂商容器运行兼容。
 
 真实 GaussDB、Spark Master、厂商驱动和生产配置不属于源码构建条件，必须在部署验收阶段单独提供和验证。

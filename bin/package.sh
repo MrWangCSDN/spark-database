@@ -18,7 +18,7 @@ cp config/application-local.properties.example "$bundle/config/application-local
 # 仅打包占位模板，禁止把本机真实环境凭据带入发布包。
 cp config/bd.env.example "$bundle/config/bd.env"
 chmod 600 "$bundle/config/bd.env"
-cp bin/start.sh bin/runtime.sh bin/check-driver.sh bin/CheckJdbcDriver.java "$bundle/bin/"
+cp bin/start.sh bin/runtime.sh bin/encrypt-password.sh bin/check-driver.sh bin/CheckJdbcDriver.java "$bundle/bin/"
 cp start.sh stop.sh "$bundle/"
 cp -R sql "$bundle/"
 cp README.md "$bundle/"

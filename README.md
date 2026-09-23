@@ -98,16 +98,21 @@ export SPARK_HOME=/path/to/spark-3.5.3-bin-hadoop3
 export SPARK_MASTER=spark://your-spark-master:7077
 export TSS_METADATA_URL='jdbc:your-metadata-url'
 export TSS_METADATA_USER='your-user'
-export TSS_METADATA_PASSWORD='your-password'
+read -r -s -p 'Jasypt 口令：' JASYPT_ENCRYPTOR_PASSWORD; export JASYPT_ENCRYPTOR_PASSWORD
+export TSS_METADATA_PASSWORD='ENC(your-encrypted-password)'
 export TSS_METADATA_DRIVER='your.driver.Class'
 ./start.sh
 ```
 
 根目录 `start.sh` 后台启动服务，将PID写入 `bd.pid`，控制台日志写入 `logs/bd-console.log`。执行 `./stop.sh` 发送 `SIGTERM` 并等待优雅退出；等待时间默认120秒，可通过 `BD_STOP_TIMEOUT_SECONDS` 调整，超时后不会自动强杀Spark作业。`bin/start.sh` 保留为前台启动入口，适合交给systemd等进程管理器。
 
+内网正式构建默认使用 BES Lite Starter `3.x-11.5.0.004`，并从内网 Maven 仓库解析该厂商制品；Web Starter 已排除内嵌 Tomcat。外网本地没有 BES 制品时可用 `mvn -Plocal-servlet-tests -Dgauss-jdbc.version=6.0.0 verify` 验证业务逻辑，该 profile 只在测试范围加入 Tomcat，不能作为 BES 发布物。内网用默认 profile 构建后，先检查服务 JAR 中存在 BES Starter 且没有 Tomcat，再启动验证页面和 API。
+
+元数据库密码在 `config/bd.env` 中使用 `TSS_METADATA_PASSWORD='ENC(...)'`；`JASYPT_ENCRYPTOR_PASSWORD` 由外部运行环境注入，不能放进 `bd.env`、源码或源码包。可在部署目录执行 `bin/encrypt-password.sh`，按提示输入明文密码，将输出密文填入 `bd.env`。加密与解密必须使用同一口令；脚本采用 Jasypt 3.0.5 的 `PBEWITHHMACSHA512ANDAES_256`、随机盐与 IV。启动时会检查密文格式及解密口令是否存在，不会输出密码。`spark.datasource.password` 引用同一个已解密的元库密码。业务库连接密码仍沿用表内现有 AES 协议，不能把这两种密文格式混用。
+
 若要清空全部比对运行记录，先在部署目录执行 `./stop.sh`，再到 Spark Master / YARN 确认本服务提交的比对应用均已结束。随后连接 **bd 元数据库**（使用与服务相同的 schema）执行 `sql/clear_bcomp_runtime_data_new.sql`。脚本清空任务、批次、结果汇总和差异样本六张表，保留核对配置、字段规则及数据库连接；SQL 末尾会查询六张表的剩余行数。确认全为 0 后再执行 `./start.sh`。此操作会永久删除历史运行记录，执行前可先备份元数据库。
 
-新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
+新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`；若采用这组属性，`password` 同样必须填写 Jasypt `ENC(...)` 密文。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
 
 Spark写任务/结果的 `spark.datasource.*` 和服务元数据源**必须指向同一逻辑库**。原Spark资源参数值保留在示例中，仅作为原配置记录，不代表适合当前服务器或保证2000万行安全。`maxPoolSize=1`表示一次一个Spark作业；并发数是每个服务实例的并发，实例数增加会叠加。
 

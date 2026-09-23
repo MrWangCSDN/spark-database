@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.core.env.Environment;
 import java.util.Map;
 import java.util.UUID;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,9 +37,19 @@ class ApplicationSmokeTest {
         registry.add("spring.datasource.username", () -> "sa");
         registry.add("spring.datasource.password", () -> "");
         registry.add("spring.datasource.driver-class-name", () -> "org.h2.Driver");
+        registry.add("jasypt.encryptor.password", () -> "smoke-key");
+        registry.add("jasypt.encryptor.algorithm", () -> "PBEWITHHMACSHA512ANDAES_256");
+        registry.add("jasypt.encryptor.iv-generator-classname", () -> "org.jasypt.iv.RandomIvGenerator");
+        registry.add("encrypted.metadata.password", () -> "ENC(" + MetadataPasswordCipher.encryptor("smoke-key").encrypt("runtime-password") + ")");
+        registry.add("spark.datasource.password", () -> "${encrypted.metadata.password}");
     }
     @Autowired TestRestTemplate http;
     @Autowired JdbcTemplate jdbc;
+    @Autowired Environment environment;
+    @Test void jasyptDecryptsPropertyAndNestedSparkPassword() {
+        assertThat(environment.getProperty("encrypted.metadata.password")).isEqualTo("runtime-password");
+        assertThat(environment.getProperty("spark.datasource.password")).isEqualTo("runtime-password");
+    }
     @Test void bootsStandaloneWithoutFileOrRedisTables() {
         assertThat(http.getForObject("/tss/runStatus",String.class)).isEqualTo("2");
         assertThat(http.postForObject("/api/cache/refresh",null,Map.class)).containsEntry("code",200);
