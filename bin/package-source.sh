@@ -12,6 +12,7 @@ fi
 version="${SOURCE_VERSION:-1.0.0-SNAPSHOT}"
 root_name="tss-compare-source-${version}"
 output_dir="$project_dir/target"
+mkdir -p "$output_dir"
 staging_dir="$(mktemp -d "$output_dir/source-package.XXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
 
