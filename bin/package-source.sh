@@ -17,25 +17,24 @@ staging_dir="$(mktemp -d "$output_dir/source-package.XXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
 
 mkdir -p "$staging_dir/$root_name"
-git archive HEAD | tar -x -C "$staging_dir/$root_name"
+git archive HEAD pom.xml compare-service compare-spark bin config sql README.md docs start.sh stop.sh tests \
+  | tar -x -C "$staging_dir/$root_name"
 git rev-parse HEAD > "$staging_dir/$root_name/SOURCE-COMMIT.txt"
 
-# Carry the already built frontend so the inner-network Maven build can skip Node/npm.
+# Put the built frontend inside backend resources, so the source ZIP needs no UI project.
 test -s compare-ui/dist/index.html || {
   printf '缺少已构建前端：请先在外网执行 mvn verify，再生成源码包。\n' >&2
   exit 1
 }
-mkdir -p "$staging_dir/$root_name/compare-ui/dist"
-cp -R compare-ui/dist/. "$staging_dir/$root_name/compare-ui/dist/"
+static_dir="$staging_dir/$root_name/compare-service/src/main/resources/static"
+mkdir -p "$static_dir"
+cp -R compare-ui/dist/. "$static_dir/"
 
 required=(
   pom.xml
   compare-service/pom.xml
   compare-spark/pom.xml
-  compare-ui/package.json
-  compare-ui/package-lock.json
-  compare-ui/src/main.tsx
-  compare-ui/dist/index.html
+  compare-service/src/main/resources/static/index.html
   docs/migration/intranet-build.md
 )
 for file in "${required[@]}"; do

@@ -2,9 +2,9 @@
 
 ## 源码包内容
 
-源码 ZIP 同时包含 `compare-service`、`compare-spark`、`compare-ui` 源码和在外网已构建的 `compare-ui/dist`。内网使用下文的跳过参数时，无需安装 Node/npm 或重新编译前端；Maven 会把 ZIP 中的 `dist` 复制到后端 JAR 的 `BOOT-INF/classes/static`。如需修改前端源码，仍须重新执行完整前端构建再打包源码 ZIP。
+源码 ZIP 只包含后端 `compare-service`、Spark 作业 `compare-spark` 及构建/部署文件，不包含 `compare-ui` 工程。前端已在外网构建，并直接放入 `compare-service/src/main/resources/static/`；内网 Maven 会将这些静态资源打入后端 JAR 的 `BOOT-INF/classes/static/`。使用下文的跳过参数时，无需安装 Node/npm 或重新编译前端。如需修改前端页面，须回到含 `compare-ui` 的完整工程重新构建并生成源码 ZIP。
 
-源码包不包含 `.git`、`node_modules`、`target`、本地数据库配置、密码或依赖缓存。`SOURCE-COMMIT.txt` 记录打包提交，ZIP 旁的 `.sha256` 文件用于传输校验。
+源码包不包含 `.git`、`compare-ui` 源码、`node_modules`、`target`、本地数据库配置、密码或依赖缓存。`SOURCE-COMMIT.txt` 记录打包提交，ZIP 旁的 `.sha256` 文件用于传输校验。
 
 ## 内网构建前置条件
 
@@ -26,7 +26,7 @@
 npm config set registry https://your-internal-npm/repository/npm-group/
 ```
 
-如需在内网重新编译前端，Node 下载地址由 `frontend-maven-plugin` 使用。内网不能访问默认地址时，需要在企业制品库镜像 Node 官方目录，并提供插件对应的 `nodeDownloadRoot` 配置；也可以预热 Node 22.14.0 到构建节点的插件缓存。
+本源码 ZIP 不含前端源码；若需重新编译前端，请使用完整工程。Node 下载地址由 `frontend-maven-plugin` 使用。内网不能访问默认地址时，需要在企业制品库镜像 Node 官方目录，并提供插件对应的 `nodeDownloadRoot` 配置。
 
 ## 构建与验收
 
@@ -47,6 +47,6 @@ jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
 tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz
 ```
 
-第一条命令必须找到管理台首页，证明预编译前端已进入后端 JAR。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数只跳过 Node/npm，不跳过后端和 Spark 的测试。
+第一条命令必须找到管理台首页，证明后端源码中的静态页面已进入后端 JAR。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数只跳过 Node/npm，不跳过后端和 Spark 的测试。
 
 真实 GaussDB、Spark Master、厂商驱动和生产配置不属于源码构建条件，必须在部署验收阶段单独提供和验证。
