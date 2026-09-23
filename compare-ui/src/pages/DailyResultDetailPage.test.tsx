@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderPage } from '../test/render'
 import { server } from '../test/server'
@@ -43,9 +43,15 @@ test('shows one-sided rows and the largest field pattern without per-record clic
   expect(await screen.findByText('C002')).toBeVisible()
   await user.click(screen.getByRole('tab', { name: /主键相同、字段不同/ }))
   expect(await screen.findByText('[balance、status]')).toBeVisible()
-  expect(screen.getAllByText('1 行')).toHaveLength(2)
-  expect(await screen.findByText('sit 100')).toBeVisible()
-  expect(screen.getByText('uat 200')).toBeVisible()
+  const patternPicker = screen.getByRole('group', { name: '差异字段组合' })
+  expect(within(patternPicker).getAllByText('1 行')).toHaveLength(2)
+  expect(within(patternPicker).getAllByText('1 条')).toHaveLength(2)
+  expect(within(patternPicker).getByRole('button', { name: /\[balance\]/ })).toHaveAttribute('aria-pressed', 'true')
+  await screen.findByRole('columnheader', { name: /余额/ })
+  expect(screen.getByText('sit → uat')).toBeVisible()
+  const balanceCell = screen.getByRole('cell', { name: /sit 100.*uat 200/ })
+  expect(within(balanceCell).getByText('100')).toBeVisible()
+  expect(within(balanceCell).getByText('200')).toBeVisible()
   expect(screen.queryByRole('button', { name: '查看字段' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('tab', { name: /仅 sit 存在/ }))
   expect(await screen.findByRole('columnheader', { name: /客户号/ })).toBeVisible()
@@ -56,7 +62,9 @@ test('falls back to legacy samples when an old result has no field groups', asyn
   renderPage(<DailyResultDetailPage />, '/results/1/20260920')
   await user.click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
   expect(await screen.findByText(/请重新执行核对/)).toBeVisible()
-  expect(await screen.findByText('sit 100')).toBeVisible()
+  await screen.findByRole('columnheader', { name: /余额/ })
+  expect(screen.getByText('sit → uat')).toBeVisible()
+  expect(screen.getByRole('cell', { name: /sit 100.*uat 200/ })).toBeVisible()
 })
 test('paginates samples within the chosen group and resets on another group', async () => {
   mock(false, [
@@ -74,7 +82,7 @@ test('paginates samples within the chosen group and resets on another group', as
   await user.click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
   await user.click(await screen.findByRole('button', { name: '下一页' }))
   expect(await screen.findByText(/第 2 \/ 2 页/)).toBeVisible()
-  await user.click(screen.getByRole('button', { name: '[status]' }))
+  await user.click(screen.getByRole('button', { name: /\[status\]/ }))
   expect(await screen.findByText(/第 1 \/ 1 页/)).toBeVisible()
   expect(requests).toContain('balance:1')
   expect(requests).toContain('status:0')
