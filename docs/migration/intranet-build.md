@@ -12,7 +12,7 @@
 |---|---|
 | JDK | 17；不要使用本机默认 JDK 25 构建当前 Lombok 版本 |
 | Maven | 3.9 或更高版本 |
-| Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、前端 Maven 插件、JDBC 驱动及全部传递依赖 |
+| Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、前端 Maven 插件、JDBC 驱动及全部传递依赖；尤其要预置 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`，该版本不在 Maven Central |
 | Node 分发源 | 必须能提供 Node `22.14.0`；默认插件会访问 `nodejs.org` |
 | npm 仓库 | 必须提供 `package-lock.json` 锁定的 npm 包和 npm `10.9.2`；可使用企业 npm Registry |
 | 构建资源 | 建议至少 4 CPU、8 GiB 内存和 5 GiB 可用磁盘 |

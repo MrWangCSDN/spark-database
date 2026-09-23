@@ -58,6 +58,12 @@
       <scope>runtime</scope>
     </dependency>
     <dependency>
+      <groupId>org.opengauss</groupId>
+      <artifactId>opengauss-jdbc</artifactId>
+      <version>${gauss-jdbc.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
       <groupId>com.oracle.database.jdbc</groupId>
       <artifactId>ojdbc8</artifactId>
       <version>21.9.0.0</version>

@@ -19,5 +19,6 @@
     <java.version>17</java.version>
     <spark.version>3.5.3</spark.version>
     <postgresql.version>42.7.12</postgresql.version>
+    <gauss-jdbc.version>6.0.0-htrunk8</gauss-jdbc.version>
   </properties>
 </project>

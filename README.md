@@ -50,7 +50,7 @@ target/tss-compare-1.0.0-SNAPSHOT.tar.gz
     stop.sh                   # SIGTERM优雅停止
     lib/compare-service-1.0.0-SNAPSHOT.jar
     jobs/compare-spark-1.0.0-SNAPSHOT.jar
-    drivers/                  # Oracle/PostgreSQL/MySQL运行时驱动
+    drivers/                  # Oracle/PostgreSQL/MySQL/openGauss运行时驱动
     config/application-local.properties.example
     bin/start.sh
 ```
@@ -84,10 +84,10 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 2. 将 `config/application-local.properties.example` 复制为 `config/application-local.properties`，设置元数据库连接和 Spark 地址。也可把旧 `application-datasource.properties`、`application-executor.properties`、`application-spark.properties` 放在 `config/` 中；原数据库 `primary=frw` 及 `spring.datasource.dynamic.datasource.frw.*` 无需改名。不要复制旧 `application.properties` 的文件/Redis/MyBatis profiles。
 3. 修改**部署属性** `app_resource`，指向新 `jobs/compare-spark-1.0.0-SNAPSHOT.jar`；设置 `spark_home` 指向本机 Spark 3.5.3。`spark_mainClass` 支持原“文件类,库表类”配置或单个库表类。没有修改数据库中任何表配置。
 4. 按数据库实际协议选择驱动：
-   - PostgreSQL 兼容的 GaussDB A：`jdbc:postgresql://host:port/database?currentSchema=业务schema` 与 `org.postgresql.Driver`，发布包已包含 PostgreSQL 驱动。
+   - PostgreSQL 兼容的 GaussDB A（本项目元库默认配置）：`jdbc:postgresql://host:port/database?currentSchema=业务schema` 与 `org.postgresql.Driver`，发布包已包含 PostgreSQL 驱动。元库使用此协议时，`bd.env` 不需要填写 `BD_JDBC_JAR`。
    - 华为原生协议：`jdbc:gaussdb://host:port/database?currentSchema=业务schema` 与现场厂商文档指定的驱动类；将有合法授权的原生驱动 JAR 放入 `drivers/`。
-   - openGauss：按现场版本确认 JDBC URL，例如 `jdbc:opengauss://host:port/database?currentSchema=业务schema`，驱动类通常为 `org.opengauss.Driver`；将现场确认的驱动 JAR 放入 `drivers/`。
-   PostgreSQL 驱动不能处理 `jdbc:gaussdb` 等其他协议。工程不下载或捆绑厂商闭源驱动。
+   - openGauss：按现场版本确认 JDBC URL，例如 `jdbc:opengauss://host:port/database?currentSchema=业务schema`，驱动类为 `org.opengauss.Driver`。工程默认依赖 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`，完整构建后会自动进入服务 JAR 和发布包的 `drivers/`，无需手工修改 POM 或复制该 JAR。
+   PostgreSQL 驱动不能处理 `jdbc:gaussdb` 等其他协议。openGauss 依赖不等于华为原生 GaussDB 驱动；`jdbc:gaussdb` 仍需现场厂商 JAR。`6.0.0-htrunk8` 不在 Maven Central，内网 Maven 仓库必须已有该制品。
    `currentSchema` 参数名大小写不敏感，但解码后的值不能为空。已有不合规连接仍可查看，服务不会推断或自动改写 schema；再次保存、测试或用于新任务前必须人工补齐。该规则只约束 `TSS_BCOMP_DATABASE_CONFIG_NEW` 中的比对连接，不约束微服务自身的 `spring.datasource.*` 或 Spark 元数据库的 `spark.datasource.*`。
 5. `bin/start.sh` 使用 Boot PropertiesLauncher 的 `loader.path` 把 `drivers/` 加入服务类路径，并通过 `COMPARE_SPARK_JARS` 将同目录 JAR 传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动绝对路径。原生驱动必须在每个 Spark 节点可读，Driver和Executor节点必须能访问原库、目标库、元数据库。
 6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值。也可写入发布目录的 `config/bd.env`，根目录 `start.sh` 会通过 `bin/start.sh` 自动加载：
@@ -197,7 +197,7 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 
 启停脚本共用 `bin/runtime.sh` 加载 `config/bd.env`。启动前检查 JDK 17、两个 JAR、配置及驱动类；重复启动不会拉起第二个实例。根 start.sh 最长等待 BD_START_WAIT_SECONDS（默认30秒）的本次启动完成日志，超时保留进程与 PID 供排查。停止脚本只对带本目录标识的服务 PID 发送 SIGTERM；不会停止 Spark Master/Worker 或旧核对服务。旧版脚本启动的进程需要先人工核对后停止，再使用新版脚本。日志按每次启动归档。
 
-openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，厂商 JAR 放 drivers/。可执行 `bin/check-driver.sh` 离线验证驱动类和 URL 是否匹配；该检查不连接数据库。Spark 对 jdbc:opengauss 注册游标事务设置，在 fetchsize>0 时关闭自动提交。真实驱动、数据库版本及集群连通性仍需现场验证。
+openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将依赖 JAR 放入 drivers/。可执行 `bin/check-driver.sh` 离线验证驱动类和 URL 是否匹配；该检查不连接数据库。Spark 对 jdbc:opengauss 注册游标事务设置，在 fetchsize>0 时关闭自动提交。数据库版本及集群连通性仍需现场验证。
 
 
 ## 批量核对工作台（2026-09-22）
