@@ -57,7 +57,7 @@ export interface DailyResults {
   connections: Array<TaskDatabaseContext & { objectCount: number }>
 }
 export interface DailySamples {
-  summary: DailyResult; items: Array<{ businessKey: string; detail: { fields: Array<{ name: string; originValue: string | null; destinationValue: string | null }>; truncated: boolean } }>;
+  summary: DailyResult; items: Array<{ businessKey: string; detail: { fields: Array<{ name: string; label?: string | null; originValue: string | null; destinationValue: string | null }>; truncated: boolean } }>;
   page: number; size: number; total: number
 }
 export interface FieldPattern {

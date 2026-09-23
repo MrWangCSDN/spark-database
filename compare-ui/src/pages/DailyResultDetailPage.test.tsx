@@ -21,23 +21,34 @@ function mock(expired = false, patterns: Array<{ patternId: string; fields: stri
     http.get('/api/results/1/20260920/differences', ({ request }) => {
       const params = new URL(request.url).searchParams
       expect(params.get('version')).toBe('v1')
+      if (params.get('type') !== '4') expect(params.get('patternId')).toBeNull()
       if (params.get('type') === '4' && patterns.length) expect(params.get('patternId')).toBeTruthy()
-      return HttpResponse.json({ summary, items: expired ? [] : [{ businessKey: 'key', detail: { fields: [{ name: 'balance', originValue: '100', destinationValue: '200' }], truncated: false } }], page: 0, size: 20, total: expired ? 0 : params.get('type') === '4' ? 1 : 1000 })
+      expect(params.get('size')).toBe('100')
+      const fields = params.get('type') === '4'
+        ? [{ name: 'balance', label: '余额', originValue: '100', destinationValue: '200' }]
+        : [{ name: 'id', label: 'ID', originValue: params.get('type') === '3' ? '1' : null, destinationValue: params.get('type') === '2' ? '1' : null }, { name: 'customer_no', label: '客户号', originValue: params.get('type') === '3' ? 'C001' : null, destinationValue: params.get('type') === '2' ? 'C002' : null }, { name: 'balance', label: '余额', originValue: params.get('type') === '3' ? '100' : null, destinationValue: params.get('type') === '2' ? '200' : null }]
+      return HttpResponse.json({ summary, items: expired ? [] : [{ businessKey: 'key', detail: { fields, truncated: false } }], page: 0, size: 100, total: expired ? 0 : params.get('type') === '4' ? 1 : 1000 })
     }),
     http.get('/api/results', () => HttpResponse.json({ results: { items: [daily], total: 1, page: 0, size: 20 }, connections: [{ ...daily, objectCount: 1 }] }))
   )
 }
-test('distinguishes full counts and saved samples and expands different fields', async () => {
+test('shows one-sided rows and the largest field pattern without per-record clicks', async () => {
   mock(); const user = userEvent.setup()
   renderPage(<DailyResultDetailPage />, '/results/1/20260920')
   expect(await screen.findByText(/实际差异 1,000,000 条 · 已保存明细 1,000 条/)).toBeVisible()
+  expect(await screen.findByRole('columnheader', { name: /客户号/ })).toBeVisible()
+  expect(screen.getByText('C001')).toBeVisible()
+  expect(screen.queryByRole('button', { name: '查看字段' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('tab', { name: /仅 uat 存在/ }))
+  expect(await screen.findByText('C002')).toBeVisible()
   await user.click(screen.getByRole('tab', { name: /主键相同、字段不同/ }))
   expect(await screen.findByText('[balance、status]')).toBeVisible()
   expect(screen.getAllByText('1 行')).toHaveLength(2)
-  await user.click(screen.getAllByRole('button', { name: '查看样本' })[0])
-  await user.click(await screen.findByRole('button', { name: '查看字段' }))
-  expect(screen.getByText('sit 的值')).toBeVisible(); expect(screen.getByText('uat 的值')).toBeVisible()
-  expect(screen.getByText('100', { exact: true })).toBeVisible(); expect(screen.getByText('200', { exact: true })).toBeVisible()
+  expect(await screen.findByText('sit 100')).toBeVisible()
+  expect(screen.getByText('uat 200')).toBeVisible()
+  expect(screen.queryByRole('button', { name: '查看字段' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('tab', { name: /仅 sit 存在/ }))
+  expect(await screen.findByRole('columnheader', { name: /客户号/ })).toBeVisible()
 })
 test('falls back to legacy samples when an old result has no field groups', async () => {
   mock(false, [])
@@ -45,7 +56,7 @@ test('falls back to legacy samples when an old result has no field groups', asyn
   renderPage(<DailyResultDetailPage />, '/results/1/20260920')
   await user.click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
   expect(await screen.findByText(/请重新执行核对/)).toBeVisible()
-  expect(await screen.findByRole('button', { name: '查看字段' })).toBeVisible()
+  expect(await screen.findByText('sit 100')).toBeVisible()
 })
 test('paginates samples within the chosen group and resets on another group', async () => {
   mock(false, [
@@ -56,15 +67,14 @@ test('paginates samples within the chosen group and resets on another group', as
   server.use(http.get('/api/results/1/20260920/differences', ({ request }) => {
     const params = new URL(request.url).searchParams
     requests.push(`${params.get('patternId')}:${params.get('page')}`)
-    return HttpResponse.json({ summary: daily, items: [{ businessKey: 'key', detail: { fields: [], truncated: false } }], page: Number(params.get('page')), size: 20, total: params.get('patternId') === 'balance' ? 25 : 2 })
+    return HttpResponse.json({ summary: daily, items: [{ businessKey: 'key', detail: { fields: [], truncated: false } }], page: Number(params.get('page')), size: 100, total: params.get('patternId') === 'balance' ? 125 : 2 })
   }))
   const user = userEvent.setup()
   renderPage(<DailyResultDetailPage />, '/results/1/20260920')
   await user.click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
-  await user.click((await screen.findAllByRole('button', { name: '查看样本' }))[0])
   await user.click(await screen.findByRole('button', { name: '下一页' }))
   expect(await screen.findByText(/第 2 \/ 2 页/)).toBeVisible()
-  await user.click(screen.getAllByRole('button', { name: '查看样本' })[1])
+  await user.click(screen.getByRole('button', { name: '[status]' }))
   expect(await screen.findByText(/第 1 \/ 1 页/)).toBeVisible()
   expect(requests).toContain('balance:1')
   expect(requests).toContain('status:0')

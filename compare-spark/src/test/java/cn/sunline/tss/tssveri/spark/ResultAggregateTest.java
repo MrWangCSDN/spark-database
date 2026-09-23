@@ -38,6 +38,13 @@ class ResultAggregateTest {
         assertEquals("",row.fields.get(0).destinationValue);
         assertTrue(row.fields.get(1).originValue.length()<=1024);
     }
+    @Test void snapshotsChineseFieldLabelsAndFallsBackToNames() throws Exception {
+        var row=SampleRow.of("key","3",List.of("ID","CUSTOMER_NO"),List.of("编号","  "),
+            new String[]{"1","C001"},null,List.of());
+        assertEquals("编号",row.fields.get(0).label);
+        assertEquals("CUSTOMER_NO",row.fields.get(1).label);
+        assertTrue(row.json().contains("\"label\":\"编号\""));
+    }
     @Test void numericKeysPreservePrecisionButIgnoreScale() {
         assertEquals("1",SampleRow.keyValue(" 1.00 ","2"));
         assertEquals("9007199254740993",SampleRow.keyValue("9007199254740993.00","2"));

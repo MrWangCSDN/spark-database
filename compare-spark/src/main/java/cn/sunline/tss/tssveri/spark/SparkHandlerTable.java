@@ -191,13 +191,14 @@ public class SparkHandlerTable {
             List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap,int limit) {
         ResultAggregate result=new ResultAggregate(limit);
         List<String> names=fields.stream().map(row -> (String)row.getAs("FIELD_NAME")).collect(Collectors.toList());
+        List<String> labels=fields.stream().map(row -> (String)row.getAs("FIELD_MEMO")).collect(Collectors.toList());
         while(groups.hasNext()) {
             var group=groups.next();String key=group._1();
             String[] a=uniqueRecord(group._2()._1()),b=uniqueRecord(group._2()._2());
             ArrayList<String> different=new ArrayList<>();
             String type=a==null?"2":b==null?"3":compareRows(fields,ignoreData,enumMap,a,b,different)?"4":null;
             if(type==null) result.matched=Math.addExact(result.matched,1);
-            else result.difference(type,key,different,()->SampleRow.of(key,type,names,a,b,different));
+            else result.difference(type,key,different,()->SampleRow.of(key,type,names,labels,a,b,different));
         }
         return result;
     }
