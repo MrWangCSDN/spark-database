@@ -105,6 +105,8 @@ export TSS_METADATA_DRIVER='your.driver.Class'
 
 根目录 `start.sh` 后台启动服务，将PID写入 `bd.pid`，控制台日志写入 `logs/bd-console.log`。执行 `./stop.sh` 发送 `SIGTERM` 并等待优雅退出；等待时间默认120秒，可通过 `BD_STOP_TIMEOUT_SECONDS` 调整，超时后不会自动强杀Spark作业。`bin/start.sh` 保留为前台启动入口，适合交给systemd等进程管理器。
 
+若要清空全部比对运行记录，先在部署目录执行 `./stop.sh`，再到 Spark Master / YARN 确认本服务提交的比对应用均已结束。随后连接 **bd 元数据库**（使用与服务相同的 schema）执行 `sql/clear_bcomp_runtime_data_new.sql`。脚本清空任务、批次、结果汇总和差异样本六张表，保留核对配置、字段规则及数据库连接；SQL 末尾会查询六张表的剩余行数。确认全为 0 后再执行 `./start.sh`。此操作会永久删除历史运行记录，执行前可先备份元数据库。
+
 新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
 
 Spark写任务/结果的 `spark.datasource.*` 和服务元数据源**必须指向同一逻辑库**。原Spark资源参数值保留在示例中，仅作为原配置记录，不代表适合当前服务器或保证2000万行安全。`maxPoolSize=1`表示一次一个Spark作业；并发数是每个服务实例的并发，实例数增加会叠加。
