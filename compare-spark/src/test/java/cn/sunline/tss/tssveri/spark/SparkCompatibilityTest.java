@@ -83,11 +83,11 @@ class SparkCompatibilityTest {
                 assertTrue(r.getString("BCOMP_READ_MODE").contains("HASH"));
                 if ("HASH".equals(strategy)) {
                     assertTrue(r.getString("BCOMP_READ_MODE").contains("HASH"));
-                    assertTrue(r.getString("BCOMP_READ_MODE").contains(partitions+"分区"));
+                    assertTrue(r.getString("BCOMP_READ_MODE").contains("1分区"));
                 }
             }
             if ("HASH".equals(strategy)) {
-                assertEquals(List.of(partitions,partitions),jdbcStagePartitions);
+                assertEquals(List.of(1,1),jdbcStagePartitions);
             }
             var codes=new HashMap<String,Integer>();
             try(var r=s.executeQuery("select * from TSS_BCOMP_DTL_NEW")) { while(r.next()) {

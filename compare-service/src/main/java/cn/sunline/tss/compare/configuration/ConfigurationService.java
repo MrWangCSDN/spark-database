@@ -91,7 +91,6 @@ public class ConfigurationService {
             if("1".equals(f.indexFlag()))keys++;
         }
         if(keys==0)throw ApiException.badRequest("BUSINESS_KEY_REQUIRED","至少配置一个业务键字段");
-        if(b.partitionNum()!=null&&(b.partitionNum()<1||b.partitionNum()>256))throw ApiException.badRequest("INVALID_PARTITION_COUNT","主键 HASH 分区数必须为 1～256");
     }
     private static boolean blank(String value){return value==null||value.isBlank();}
 }

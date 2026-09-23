@@ -122,9 +122,6 @@ public class SparkHandlerTable {
             //获取tssBcompField字段信息（需在获取数据源配置之前，因为分区列从field表中读取）
             List<Row> tssBcompFieldDataRows = getTssBcompFieldData(sc,args);
 
-            //主键来自字段配置，读取方式固定HASH，仅配置分区数
-            ShardConf shardConf = readShardConf(args);
-
             //替换SQL中的${HDRQ}占位符（使用核对日期args[compDateIndex]）
             String sqlDateParam = DailyResultPublisher.resultDate(args);
             if (sqlDateParam != null && !sqlDateParam.isEmpty()) {
@@ -133,6 +130,11 @@ public class SparkHandlerTable {
                 log.info("SQL占位符替换完成，核对日期: {}", sqlDateParam);
             }
 
+            //先校验两侧业务键，避免无效配置触发大表计数。
+            PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_OLD_INDEX);
+            PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_NEW_INDEX);
+            //实时统计两侧本次 SQL 的行数，自动选择相同的 HASH 分区数。
+            ShardConf shardConf = new ShardConf(AutoHashPartitionPlanner.plan(args));
             //按所有主键字段构造HASH读取计划；失败直接终止
             ReadPlan readPlan = resolveReadPlan(args, tssBcompFieldDataRows, shardConf);
             //回写实际读取策略到TSS_BCOMP_TASK_NEW.BCOMP_READ_MODE，运维可见实际分区数（列不存在时只告警）
@@ -467,22 +469,6 @@ public class SparkHandlerTable {
                 }
             }
         }
-    }
-
-    /** HASH is the only read strategy. A missing count explicitly means one partition. */
-    static ShardConf readShardConf(String[] args) {
-        try {
-            Class.forName(args[tssDataSourceDriver]);
-            try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
-                PreparedStatement ps=connection.prepareStatement("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?")) {
-                ps.setLong(1,Long.parseLong(args[bcompIndex]));
-                try(ResultSet rs=ps.executeQuery()) {
-                    if(!rs.next()) throw new IllegalArgumentException("核对配置不存在");
-                    Object value=rs.getObject(1);
-                    return new ShardConf(value==null?1:PrimaryKeyHashPlanner.partitionCount(value));
-                }
-            }
-        } catch(Exception error) { throw new IllegalArgumentException("HASH分区配置读取失败",error); }
     }
 
     /**

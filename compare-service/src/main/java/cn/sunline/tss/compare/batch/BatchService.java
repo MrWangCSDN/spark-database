@@ -209,9 +209,6 @@ public class BatchService {
             if ("1".equals(field.get("FIELD_INDEX_FLAG"))) keys++;
         }
         if (keys == 0) return new Issue("BUSINESS_KEY_REQUIRED", "至少需要配置一个主键或业务核对键字段");
-        String count = configuration.value("BCOMP_PARTITION_NUM");
-        if (count != null && (positiveNumber(count) < 1 || positiveNumber(count) > 256))
-            return new Issue("INVALID_PARTITION_COUNT", "主键 HASH 分区数必须为 1～256");
         return null;
     }
 

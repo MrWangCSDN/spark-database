@@ -123,11 +123,10 @@ class ConfigurationApiTest {
             .andExpect(status().isCreated());
         assertThat(jdbc.queryForObject("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=31",Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT FIELD_PARTITION_FLAG FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=31",String.class)).isEqualTo("0");
-        for(int count : new int[]{0,257}) {
-            mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
-                .content(valid(32,"bad").replace("\"partitionNum\":16", "\"partitionNum\":"+count)))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_PARTITION_COUNT"));
-        }
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
+            .content(valid(32,"automatic").replace("\"partitionNum\":16", "\"partitionNum\":257")))
+            .andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT BCOMP_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=32",Integer.class)).isEqualTo(1);
     }
 
     @Test void rejectsOldTableScriptWithoutTouchingOldTables() throws Exception {

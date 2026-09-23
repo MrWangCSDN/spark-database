@@ -72,12 +72,12 @@ public class ConfigurationRepository {
     void insert(ConfigurationCommand command){transaction.executeWithoutResult(status->{insertBasic(command.basic());insertSql(command.basic().bcompIndex(),command.tableSql());insertFields(command.basic().bcompIndex(),command.fields());});}
     void update(ConfigurationCommand command){transaction.executeWithoutResult(status->{
         BasicConfiguration b=command.basic();
-        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_NAME=?,BCOMP_MODULE=?,BCOMP_MEMO=?,BCOMP_RANGE=?,BCOMP_TIME_NODE=?,BCOMP_STATE=?,BCOMP_PARTITION_NUM=?,BCOMP_DATE_MODE=? WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),(b.partitionNum()==null?1:b.partitionNum()),b.dateMode(),b.bcompIndex());
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_NAME=?,BCOMP_MODULE=?,BCOMP_MEMO=?,BCOMP_RANGE=?,BCOMP_TIME_NODE=?,BCOMP_STATE=?,BCOMP_PARTITION_NUM=?,BCOMP_DATE_MODE=? WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode(),b.bcompIndex());
         jdbc.update("DELETE FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=?",b.bcompIndex());insertSql(b.bcompIndex(),command.tableSql());
         jdbc.update("DELETE FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=?",b.bcompIndex());insertFields(b.bcompIndex(),command.fields());
     });}
 
-    private void insertBasic(BasicConfiguration b){jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE) VALUES(?,?,'2',?,?,?,?,?,?,?)",b.bcompIndex(),b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),(b.partitionNum()==null?1:b.partitionNum()),b.dateMode());}
+    private void insertBasic(BasicConfiguration b){jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE) VALUES(?,?,'2',?,?,?,?,?,?,?)",b.bcompIndex(),b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode());}
     private void insertSql(long index,TableSqlConfiguration s){jdbc.update("INSERT INTO TSS_BCOMP_TABLE_SQL_NEW(BCOMP_INDEX,ORIG_DATABASE_ID,DEST_DATABASE_ID,ORIG_SQL,DEST_SQL) VALUES(?,?,?,?,?)",index,s.origDatabaseId(),s.destDatabaseId(),s.origSql(),s.destSql());}
     private void insertFields(long index,List<FieldRule> fields){for(FieldRule f:fields)jdbc.update("INSERT INTO TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_MEMO,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_ENUM_FLAG,FIELD_ENUM_INDEX,FIELD_PARTITION_FLAG,FIELD_IGNORE_VALUE,FIELD_IGNORE_FLAG) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",index,f.name(),f.type(),f.memo(),f.oldIndex(),f.newIndex(),f.indexFlag(),f.enumFlag(),f.enumIndex(),"0",f.ignoreValue(),f.ignoreFlag());}
 
