@@ -60,3 +60,6 @@ export interface DailySamples {
   summary: DailyResult; items: Array<{ businessKey: string; detail: { fields: Array<{ name: string; originValue: string | null; destinationValue: string | null }>; truncated: boolean } }>;
   page: number; size: number; total: number
 }
+export interface FieldPattern {
+  patternId: string; fields: string[]; differentCount: number; sampleCount: number
+}

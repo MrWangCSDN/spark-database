@@ -38,16 +38,43 @@ public class DailyResultRepository {
         if(rows.isEmpty()) throw ApiException.notFound("RESULT_NOT_FOUND","该核对日期尚无成功发布的结果");
         return rows.get(0);
     }
-    public Samples samples(long index,String date,String type,String version,int page,int size) {
+    public record FieldPatternResult(String patternId,List<String> fields,long differentCount,int sampleCount) {}
+    public List<FieldPatternResult> fieldPatterns(long index,String date,String version) {
         return transaction.execute(status->{
             var summary=find(index,date,true);
-            if(!summary.runId().equals(version)) throw ApiException.conflict("RESULT_REPLACED","当天结果已更新，请刷新后查看");
-            long total=switch(type) { case "2" -> summary.destinationSamples();case "3" -> summary.originSamples();default -> summary.differentSamples(); };
-            List<Sample> rows=jdbc.query("SELECT COMP_INDEX_STR,DETAIL_JSON FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND LINE_RESULT=? ORDER BY SAMPLE_NO OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
-                (rs,n)->{
-                    try { return new Sample(rs.getString(1),json.readTree(rs.getString(2))); }
-                    catch(java.io.IOException e){ throw new java.sql.SQLException("差异样本格式错误",e); }
-                },index,date,type,(long)page*size,size);
+            requireVersion(summary,version);
+            return jdbc.query("SELECT PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND RUN_ID=? ORDER BY DIFFERENT_COUNT DESC,FIELDS_JSON",
+                (rs,n)->new FieldPatternResult(rs.getString(1),parseFields(rs.getString(2)),rs.getLong(3),rs.getInt(4)),index,date,version);
+        });
+    }
+    private List<String> parseFields(String value) throws java.sql.SQLException {
+        try {return json.readValue(value,new com.fasterxml.jackson.core.type.TypeReference<List<String>>(){});}
+        catch(java.io.IOException error){throw new java.sql.SQLException("差异字段组合格式错误",error);}
+    }
+    private static void requireVersion(DailyResultSummary summary,String version) {
+        if(!summary.runId().equals(version)) throw ApiException.conflict("RESULT_REPLACED","当天结果已更新，请刷新后查看");
+    }
+    public Samples samples(long index,String date,String type,String version,String patternId,int page,int size) {
+        return transaction.execute(status->{
+            var summary=find(index,date,true);
+            requireVersion(summary,version);
+            if(patternId!=null && !"4".equals(type)) throw ApiException.badRequest("INVALID_PATTERN","只有字段差异支持组合筛选");
+            long total;
+            if(patternId!=null) {
+                var counts=jdbc.query("SELECT SAMPLE_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND RUN_ID=? AND PATTERN_ID=?",
+                    (rs,n)->rs.getLong(1),index,date,version,patternId);
+                if(counts.isEmpty()) throw ApiException.notFound("PATTERN_NOT_FOUND","该字段组合不存在或结果已更新");
+                total=counts.get(0);
+            } else total=switch(type) { case "2" -> summary.destinationSamples();case "3" -> summary.originSamples();default -> summary.differentSamples(); };
+            String sql="SELECT COMP_INDEX_STR,DETAIL_JSON FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND LINE_RESULT=?"
+                +(patternId==null?"":" AND PATTERN_ID=?")+" ORDER BY SAMPLE_NO OFFSET ? ROWS FETCH NEXT ? ROWS ONLY";
+            RowMapper<Sample> mapper=(rs,n)->{
+                try { return new Sample(rs.getString(1),json.readTree(rs.getString(2))); }
+                catch(java.io.IOException e){ throw new java.sql.SQLException("差异样本格式错误",e); }
+            };
+            List<Sample> rows=patternId==null
+                ?jdbc.query(sql,mapper,index,date,type,(long)page*size,size)
+                :jdbc.query(sql,mapper,index,date,type,patternId,(long)page*size,size);
             return new Samples(summary,rows,page,size,total);
         });
     }
@@ -61,6 +88,7 @@ public class DailyResultRepository {
                 var summary=find(candidate.getKey(),candidate.getValue(),true);
                 if("1".equals(summary.detailsExpired()) || summary.publishedAt().compareTo(cutoff)>=0) return false;
                 jdbc.update("DELETE FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
+                jdbc.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET SAMPLE_COUNT=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
                 jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET DETAILS_EXPIRED='1',ORIGIN_SAMPLES=0,DESTINATION_SAMPLES=0,DIFFERENT_SAMPLES=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
                 return true;
             });

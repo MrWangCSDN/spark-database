@@ -8,7 +8,7 @@
 
 ## 不变的兼容边界
 
-通过 `sql/create_bcomp_new.sql` 新建十二张空表（九张核对业务表、两张批次表、一张每日汇总表）；旧表及数据保留。枚举、忽略值和差异字段依赖同样使用独占新表：
+通过 `sql/create_bcomp_new.sql` 新建十三张空表（九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表）；旧表及数据保留。枚举、忽略值和差异字段依赖同样使用独占新表：
 
 | 运行时表 | 用途 |
 |---|---|
@@ -151,11 +151,11 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 
 ### 授权配置主键哈希读取分区
 
-新版 Axon-link 的单表“读取配置”向授权人员开放分区数（1–256，默认 1）和样本上限（0–10000，默认 1000，0 表示只保存汇总）；普通登记编辑不修改这两个设置。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单；前端隐藏入口之外，写接口仍执行登录身份和名单校验。
+新版 Axon-link 的单表“读取配置”向授权人员开放分区数（1–256，默认 1）和样本上限（0–10000，默认 100，0 表示只保存汇总）；普通登记编辑不修改这两个设置。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单；前端隐藏入口之外，写接口仍执行登录身份和名单校验。
 
-分区数和样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为分区数、`'HASH'` 和每类差异样本上限（0–10000，Axon 默认 1000）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。比对端兼容原 8 列、前版 10 列及新版 11 列脚本，新格式的非法分区数、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；全部表配置都必须包含主键。
+分区数和样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为分区数、`'HASH'` 和每个差异字段组合的样本上限（0–10000，Axon 新建配置默认 100）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。比对端兼容原 8 列、前版 10 列及新版 11 列脚本，新格式的非法分区数、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；全部表配置都必须包含主键。
 
-导入新脚本前，目标元数据库必须已具备 `TSS_BCOMP_CONF_NEW.BCOMP_PARTITION_NUM`、`BCOMP_SHARD_STRATEGY` 和 nullable 的 `BCOMP_SAMPLE_LIMIT` 列（策略列需能保存 `HASH`）；已有元数据库先执行 `sql/add_bcomp_sample_limit_new.sql`，旧行保持 NULL，不回填 1000；应用不会自动修改生产表结构。旧版 Spark 不识别此哈希策略，必须同步升级服务和 Spark 作业 JAR，再使用新版脚本。历史版本已经生成的 SQL 保持不变，需要生成新版本才能携带调整后的分区数和样本上限。
+导入新脚本前，目标元数据库必须已具备 `TSS_BCOMP_CONF_NEW.BCOMP_PARTITION_NUM`、`BCOMP_SHARD_STRATEGY` 和 nullable 的 `BCOMP_SAMPLE_LIMIT` 列（策略列需能保存 `HASH`）；已有元数据库先执行 `sql/add_bcomp_sample_limit_new.sql`，旧行保持 NULL，不回填默认值；应用不会自动修改生产表结构。旧版 Spark 不识别此哈希策略，必须同步升级服务和 Spark 作业 JAR，再使用新版脚本。历史版本已经生成的 SQL 保持不变，需要生成新版本才能携带调整后的分区数和样本上限。
 
 `HASH` 分区数为 1 时使用单分区读取；大于 1 时在数据库查询中按完整业务键生成互斥的哈希条件，由 Spark JDBC 并行读取各片，再执行既有核对逻辑。每侧实际读取方式写入 `BCOMP_READ_MODE`（目标列存在时）。不支持的数据库方言或不可用的哈希函数会明确失败，不自动伪装成单分区成功。
 
@@ -208,7 +208,7 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，厂商 JAR 放 drive
 
 批次详情按等待、运行、一致、有差异、执行失败分别展示。进度按已结束任务数计算。重新发起失败项会建立新批次，保留原业务日期、每项核验日期和时点，使用当前配置，配置变化时提示；不把有差异当作执行失败，不覆盖旧任务与明细。批次保存任务名称和配置摘要，后续重新导入不影响历史列表。
 
-**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用 `sql/create_bcomp_new.sql` 一次建齐十二张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
+**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用 `sql/create_bcomp_new.sql` 一次建齐十三张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
 
 现有单表任务仍在 `/tasks` 查询；批次页面只展示本功能创建的批次。控制面变更在单个服务实例内串行化，当前部署按单实例运行；不要同时通过另一实例或外部 SQL 修改正在使用的配置。
 
@@ -219,6 +219,8 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，厂商 JAR 放 drive
 
 运行时只读取 `BCOMP_PARTITION_NUM`（默认 1，范围 1–256），固定使用全部 `FIELD_INDEX_FLAG=1` 字段组成的主键做 HASH。RANGE、NTILE、分区字段选择与自动探测回退已删除。旧策略列和分区标记列只为兼容旧导入格式保留，不能改变读取策略；保存/导入时分区标记清零。旧配置无需单独修改策略值。
 
-每日结果按“配置编号＋核对业务日期”保存一份最新成功结果。核对业务日期优先取 VERIFY_BUSINESS_DATE，否则取 TASK_BUSI_DATE。汇总为全量准确计数，每张表每种差异按 `BCOMP_SAMPLE_LIMIT` 保存样本（0–10000）；值为 0 时只保存汇总。该列为 NULL（含旧 8/10 列脚本）时才使用当前全局 `BD_DIFF_DETAIL_LIMIT`（默认 1000，范围 0–10000），经 `spark.compare.detailLimit` 传入 Spark；结果 `detailLimit` 记录实际采用的上限；重复成功执行原子替换，失败保留上一份成功结果。字段过长时样本截断并提示，不影响总量统计。`BD_DIFF_RETENTION_DAYS=30` 控制按最后发布时间清理样本，保留汇总，允许 1–3650 天。历史全量明细不自动删除。
+每日结果按“配置编号＋核对业务日期”保存一份最新成功结果。核对业务日期优先取 VERIFY_BUSINESS_DATE，否则取 TASK_BUSI_DATE。汇总为全量准确计数：仅一侧存在各保存至多 `BCOMP_SAMPLE_LIMIT` 条；主键相同但内容不同的行按完整差异字段组合分别计数，每个组合各保存至多该上限的样本（0–10000）。例如 `[a]` 与 `[a,b]` 是互斥的两组，组数之和等于该表的字段差异总数。值为 0 时只保存汇总。该列为 NULL（含旧 8/10 列脚本）时使用全局 `BD_DIFF_DETAIL_LIMIT`（默认 100）；显式配置的旧值 1000 不变。结果 `detailLimit` 记录实际采用的上限；重复成功执行原子替换，失败保留上一份成功结果。每个任务最多允许 128 种字段组合、合计 20000 条组合样本，超出时任务失败并保留上次成功结果。字段过长时样本截断并提示，不影响总量统计。`BD_DIFF_RETENTION_DAYS=30` 控制按最后发布时间清理样本，保留汇总，允许 1–3650 天。历史全量明细不自动删除。
 
-页面“每日结果”展示连接名称和全量统计，可打开三类差异的字段明细。当前部署仍按单服务实例运行；真实内网 Gauss 和 Spark 集群需要现场验收。
+已部署环境在每日结果表已经建好的前提下，先停止 bd 并等待 Spark 作业结束，在同一个元数据库 schema 执行一次 `sql/add_bcomp_field_patterns_new.sql`，再同时替换服务与 Spark JAR。首次空库直接运行最新 `sql/create_bcomp_new.sql`，无需执行增量脚本。Axon-link 数据库升级使用其 `V76__replay_db_compare_sample_limit_default_100.sql`，只改变以后新建行的默认值，不改已有配置及历史版本。旧每日结果无法从有限样本反推完整字段组合，需按业务日期重跑后才显示组合汇总。
+
+页面“每日结果”展示连接名称和全量统计，字段差异下可查看每个组合的精确计数及该组样本。当前部署仍按单服务实例运行；真实内网 Gauss 和 Spark 集群需要现场验收。

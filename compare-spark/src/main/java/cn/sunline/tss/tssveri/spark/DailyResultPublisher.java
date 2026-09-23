@@ -17,6 +17,10 @@ final class DailyResultPublisher {
             }
         }
     }
+    private static void addSample(PreparedStatement ps,long index,String[] args,String date,String type,int number,SampleRow row,String patternId) throws Exception {
+        ps.setLong(1,index);ps.setString(2,args[7]);ps.setString(3,args[8]);ps.setString(4,row.key);
+        ps.setString(5,type);ps.setString(6,date);ps.setInt(7,number);ps.setString(8,row.json());ps.setString(9,patternId);ps.addBatch();
+    }
     static String resultDate(String[] args) {
         String value=args[20]==null||args[20].isBlank()?args[7]:args[20];
         LocalDate.parse(value,DateTimeFormatter.BASIC_ISO_DATE);
@@ -24,6 +28,7 @@ final class DailyResultPublisher {
     }
     static void publish(Connection c,String[] args,Context context,ResultAggregate result) throws Exception {
         if(!c.getAutoCommit()) throw new SQLException("结果发布需要独立连接事务");
+        if(result.patternCount()!=result.different) throw new IllegalArgumentException("字段组合计数与差异总数不一致");
         long index=Long.parseLong(args[6]);String date=resultDate(args);
         String now=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         c.setAutoCommit(false);
@@ -35,24 +40,38 @@ final class DailyResultPublisher {
             try(var ps=c.prepareStatement("SELECT RUN_ID FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? FOR UPDATE")) {
                 ps.setLong(1,index);ps.setString(2,date);try(var rs=ps.executeQuery()){ while(rs.next()) { /* lock existing publication */ } }
             }
-            for(String table:new String[]{"TSS_BCOMP_DTL_NEW","TSS_BCOMP_RESULT_NEW"}) {
+            for(String table:new String[]{"TSS_BCOMP_DTL_NEW","TSS_BCOMP_FIELD_DIFF_NEW","TSS_BCOMP_RESULT_NEW"}) {
                 try(var ps=c.prepareStatement("DELETE FROM "+table+" WHERE BCOMP_INDEX=? AND RESULT_DATE=?")) { ps.setLong(1,index);ps.setString(2,date);ps.executeUpdate(); }
             }
+            String runId=UUID.randomUUID().toString();
             try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,DETAILS_EXPIRED) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'0')")) {
-                int i=1;ps.setLong(i++,index);ps.setString(i++,date);ps.setString(i++,UUID.randomUUID().toString());ps.setString(i++,args[7]);ps.setString(i++,args[8]);ps.setString(i++,args[9]);ps.setString(i++,context.name());
+                int i=1;ps.setLong(i++,index);ps.setString(i++,date);ps.setString(i++,runId);ps.setString(i++,args[7]);ps.setString(i++,args[8]);ps.setString(i++,args[9]);ps.setString(i++,context.name());
                 ps.setObject(i++,context.originId());ps.setString(i++,context.originName());ps.setObject(i++,context.destinationId());ps.setString(i++,context.destinationName());
                 ps.setLong(i++,result.originCount());ps.setLong(i++,result.destinationCount());ps.setLong(i++,result.matched);ps.setLong(i++,result.onlyOrigin);ps.setLong(i++,result.onlyDestination);ps.setLong(i++,result.different);
-                ps.setInt(i++,result.limit);ps.setInt(i++,result.samples("3").size());ps.setInt(i++,result.samples("2").size());ps.setInt(i++,result.samples("4").size());ps.setString(i,now);ps.executeUpdate();
+                ps.setInt(i++,result.limit);ps.setInt(i++,result.samples("3").size());ps.setInt(i++,result.samples("2").size());ps.setInt(i++,result.patternSampleCount());ps.setString(i,now);ps.executeUpdate();
             }
-            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,TASK_DATE,TASK_BATCH,COMP_INDEX_STR,LINE_RESULT,RESULT_DATE,SAMPLE_NO,DETAIL_JSON) VALUES(?,?,?,?,?,?,?,?)")) {
-                for(String type:new String[]{"2","3","4"}) {
+            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT) VALUES(?,?,?,?,?,?,?)")) {
+                for(var pattern:result.patterns()) {
+                    ps.setLong(1,index);ps.setString(2,date);ps.setString(3,runId);
+                    ps.setString(4,pattern.id);ps.setString(5,pattern.json);ps.setLong(6,pattern.count);ps.setInt(7,pattern.sampleCount());ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,TASK_DATE,TASK_BATCH,COMP_INDEX_STR,LINE_RESULT,RESULT_DATE,SAMPLE_NO,DETAIL_JSON,PATTERN_ID) VALUES(?,?,?,?,?,?,?,?,?)")) {
+                int batchCount=0;
+                for(String type:new String[]{"2","3"}) {
                     int n=0;
                     for(SampleRow row:result.samples(type)) {
-                        ps.setLong(1,index);ps.setString(2,args[7]);ps.setString(3,args[8]);ps.setString(4,row.key);ps.setString(5,type);ps.setString(6,date);ps.setInt(7,++n);ps.setString(8,row.json());ps.addBatch();
-                        if(n%100==0) { ps.executeBatch();ps.clearBatch(); }
+                        addSample(ps,index,args,date,type,++n,row,null);batchCount++;
+                        if(batchCount%100==0) {ps.executeBatch();ps.clearBatch();}
                     }
-                    ps.executeBatch();ps.clearBatch();
                 }
+                int n=0;
+                for(var pattern:result.patterns()) for(SampleRow row:pattern.sampleRows()) {
+                    addSample(ps,index,args,date,"4",++n,row,pattern.id);batchCount++;
+                    if(batchCount%100==0) {ps.executeBatch();ps.clearBatch();}
+                }
+                ps.executeBatch();ps.clearBatch();
             }
             try(var ps=c.prepareStatement("UPDATE TSS_BCOMP_TASK_NEW SET FILE1_ACOUNT=?,FILE2_ACOUNT=?,FILE1_SCOUNT=?,FILE2_SCOUNT=?,FILE1_FCOUNT=?,FILE2_FCOUNT=?,TASK_STATE='3',TASK_RESULT=?,FTASK_REASON=NULL,END_DATETIME=?,RESULT_DATE=? WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=? AND BCOMP_TIME_NODE=? AND TASK_STATE='2'")) {
                 ps.setLong(1,result.originCount());ps.setLong(2,result.destinationCount());ps.setLong(3,result.matched);ps.setLong(4,result.matched);ps.setLong(5,Math.addExact(result.different,result.onlyDestination));ps.setLong(6,Math.addExact(result.different,result.onlyOrigin));

@@ -102,6 +102,13 @@ class SparkCompatibilityTest {
                 assertTrue(r.next());assertEquals(resolved,r.getInt("DETAIL_LIMIT"));assertEquals(6,r.getLong("ORIGIN_COUNT"));assertEquals(6,r.getLong("DESTINATION_COUNT"));
                 assertEquals(2,r.getLong("ONLY_ORIGIN_COUNT"));assertEquals(2,r.getLong("ONLY_DESTINATION_COUNT"));assertEquals(2,r.getLong("DIFFERENT_COUNT"));
             }
+            try(var r=s.executeQuery("select FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT from TSS_BCOMP_FIELD_DIFF_NEW")) {
+                assertTrue(r.next());
+                assertEquals("[\"VAL\"]",r.getString("FIELDS_JSON"));
+                assertEquals(2,r.getLong("DIFFERENT_COUNT"));
+                assertEquals(samples,r.getInt("SAMPLE_COUNT"));
+                assertFalse(r.next());
+            }
         }
     }
     public static class JdbcPartitionListener extends SparkListener {

@@ -117,7 +117,7 @@ public class SparkHandlerTable {
 
         Class.forName(args[tssDataSourceDriver]);
         try (Connection connectionOut=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-            int limit=readSampleLimit(connectionOut,Long.parseLong(args[bcompIndex]),sc.conf().get("spark.compare.detailLimit","1000"));
+            int limit=readSampleLimit(connectionOut,Long.parseLong(args[bcompIndex]),sc.conf().get("spark.compare.detailLimit","100"));
             DailyResultPublisher.Context resultContext=DailyResultPublisher.context(connectionOut,Long.parseLong(args[bcompIndex]));
             //获取tssBcompField字段信息（需在获取数据源配置之前，因为分区列从field表中读取）
             List<Row> tssBcompFieldDataRows = getTssBcompFieldData(sc,args);
@@ -197,7 +197,7 @@ public class SparkHandlerTable {
             ArrayList<String> different=new ArrayList<>();
             String type=a==null?"2":b==null?"3":compareRows(fields,ignoreData,enumMap,a,b,different)?"4":null;
             if(type==null) result.matched=Math.addExact(result.matched,1);
-            else result.difference(type,key,()->SampleRow.of(key,type,names,a,b,different));
+            else result.difference(type,key,different,()->SampleRow.of(key,type,names,a,b,different));
         }
         return result;
     }

@@ -41,6 +41,25 @@ class DailyResultApiTest {
         assertThat(summary.detailsExpired()).isEqualTo("1");assertThat(summary.originSamples()).isZero();
         assertThat(repository.expire("20260923000000")).isZero();
     }
+    @Test void listsExactFieldPatternsAndPagesOnlySelectedSamples() throws Exception {
+        String first="a".repeat(64),second="b".repeat(64);
+        jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET DIFFERENT_SAMPLES=2 WHERE BCOMP_INDEX=1");
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW VALUES(1,'20260920','v1',?,'[\"a\"]',1,1)",first);
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW VALUES(1,'20260920','v1',?,'[\"a\",\"b\"]',1,1)",second);
+        for(String id:java.util.List.of(first,second)) jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,RESULT_DATE,SAMPLE_NO,COMP_INDEX_STR,LINE_RESULT,DETAIL_JSON,PATTERN_ID) VALUES(1,'20260920',?,'key','4','{\"fields\":[]}',?)",id.equals(first)?1:2,id);
+        mvc.perform(get("/api/results/1/20260920/field-patterns").param("version","v1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$[0].fields[0]").value("a"))
+            .andExpect(jsonPath("$[1].differentCount").value(1));
+        mvc.perform(get("/api/results/1/20260920/differences").param("type","4").param("version","v1").param("patternId",first))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.items.length()").value(1));
+        mvc.perform(get("/api/results/1/20260920/field-patterns").param("version","stale"))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("RESULT_REPLACED"));
+        mvc.perform(get("/api/results/1/20260920/differences").param("type","4").param("version","v1").param("patternId","bad"))
+            .andExpect(status().isBadRequest());
+        assertThat(repository.expire("20260923000000")).isEqualTo(1);
+        mvc.perform(get("/api/results/1/20260920/field-patterns").param("version","v1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$[0].differentCount").value(1)).andExpect(jsonPath("$[0].sampleCount").value(0));
+    }
     @Test void rejectsInvalidDatesTypesPagesAndMissingResults() throws Exception {
         mvc.perform(get("/api/results").param("date","20260230")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/results").param("date","20260920").param("size","101")).andExpect(status().isBadRequest());

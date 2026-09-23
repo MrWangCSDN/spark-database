@@ -11,7 +11,7 @@ class ResultAggregateTest {
             var part = new ResultAggregate(10);
             for(int n=0;n<100;n++) for(String type:List.of("2","3","4")) {
                 String key=String.format("%03d-%03d",p,n);
-                part.difference(type,key,() -> SampleRow.of(key,type,List.of("amount"),new String[]{"100"},new String[]{"200"},List.of("amount")));
+                part.difference(type,key,"4".equals(type)?List.of("amount"):List.of(),() -> SampleRow.of(key,type,List.of("amount"),new String[]{"100"},new String[]{"200"},List.of("amount")));
             }
             part.matched += 5;
             combined.merge(part);

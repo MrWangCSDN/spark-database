@@ -16,12 +16,17 @@ public class DailyResultController {
     }
     @GetMapping("/{index}/{date}")
     DailyResultSummary exact(@PathVariable long index,@PathVariable String date) { validate(date,0,20);return repository.exact(index,date); }
+    @GetMapping("/{index}/{date}/field-patterns")
+    java.util.List<DailyResultRepository.FieldPatternResult> fieldPatterns(@PathVariable long index,@PathVariable String date,@RequestParam String version) {
+        validate(date,0,20);return repository.fieldPatterns(index,date,version);
+    }
     @GetMapping("/{index}/{date}/differences")
-    DailyResultRepository.Samples samples(@PathVariable long index,@PathVariable String date,@RequestParam String type,@RequestParam String version,
+    DailyResultRepository.Samples samples(@PathVariable long index,@PathVariable String date,@RequestParam String type,@RequestParam String version,@RequestParam(required=false) String patternId,
                                         @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
         validate(date,page,size);
         if(!java.util.Set.of("2","3","4").contains(type)) throw ApiException.badRequest("INVALID_DIFFERENCE_TYPE","请选择有效差异类型");
-        return repository.samples(index,date,type,version,page,size);
+        if(patternId!=null&&!patternId.matches("[a-f0-9]{64}")) throw ApiException.badRequest("INVALID_PATTERN","字段组合编号不合法");
+        return repository.samples(index,date,type,version,patternId,page,size);
     }
     private static void validate(String date,int page,int size) {
         try { if(!date.matches("[0-9]{8}")) throw new IllegalArgumentException();LocalDate.parse(date,DateTimeFormatter.BASIC_ISO_DATE); }
