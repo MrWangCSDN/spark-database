@@ -62,7 +62,7 @@ class ApplicationSmokeTest {
 
     @Test void servesDailySampleGridThroughRealResultEndpoints() {
         String patternId="a".repeat(64);
-        jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW VALUES(17,'20260923','browser-v1','20260923','batch-1','D','客户余额','存款组',1,'sit',2,'uat',5,5,4,0,0,1,100,0,0,1,'20260923120000','0')");
+        jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW VALUES(17,'20260923','browser-v1','20260923','batch-1','D','客户余额','dept',1,'sit',2,'uat',5,5,4,0,0,1,100,0,0,1,'20260923120000','0')");
         jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW VALUES(17,'20260923','browser-v1',?,'[\"amount\"]',1,1)",patternId);
         jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,RESULT_DATE,SAMPLE_NO,COMP_INDEX_STR,LINE_RESULT,DETAIL_JSON,PATTERN_ID) VALUES(17,'20260923',1,'C001','4','{\"fields\":[{\"name\":\"amount\",\"label\":\"金额\",\"originValue\":\"120.00\",\"destinationValue\":\"125.00\"}],\"truncated\":false}',?)",patternId);
 

@@ -21,14 +21,14 @@ class DailyResultApiTest {
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(ds);
         jdbc=new JdbcTemplate(ds);repository=new DailyResultRepository(ds,new ObjectMapper());
         mvc=MockMvcBuilders.standaloneSetup(new DailyResultController(repository)).setControllerAdvice(new ApiExceptionHandler()).build();
-        jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW VALUES(1,'20260920','v1','20260921','b1','D','客户表','存款组',1,'sit',2,'uat',1000005,2000005,3,1000000,2000000,2,1000,1,0,0,'20260922120000','0')");
+        jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW VALUES(1,'20260920','v1','20260921','b1','D','客户表','dept',1,'sit',2,'uat',1000005,2000005,3,1000000,2000000,2,1000,1,0,0,'20260922120000','0')");
         jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,RESULT_DATE,SAMPLE_NO,COMP_INDEX_STR,LINE_RESULT,DETAIL_JSON) VALUES(1,'20260920',1,'key','3','{\"fields\":[{\"name\":\"id\",\"originValue\":\"key\",\"destinationValue\":null}],\"truncated\":false}')");
     }
     @Test void separatesFullCountsFromSamplesAndUsesSavedNames() throws Exception {
         mvc.perform(get("/api/results").param("date","20260920")).andExpect(status().isOk())
             .andExpect(jsonPath("$.results.total").value(1)).andExpect(jsonPath("$.connections[0].objectCount").value(1))
             .andExpect(jsonPath("$.results.items[0].onlyOriginCount").value(1000000))
-            .andExpect(jsonPath("$.results.items[0].configurationModule").value("存款组"));
+            .andExpect(jsonPath("$.results.items[0].configurationModule").value("dept"));
         mvc.perform(get("/api/results/1/20260920/differences").param("type","3").param("version","v1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.summary.onlyOriginCount").value(1000000))
             .andExpect(jsonPath("$.items[0].detail.fields[0].originValue").value("key"));

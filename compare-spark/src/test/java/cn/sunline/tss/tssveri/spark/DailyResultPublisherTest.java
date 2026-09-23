@@ -12,12 +12,12 @@ class DailyResultPublisherTest {
         try(var c=DriverManager.getConnection("jdbc:h2:mem:"+UUID.randomUUID()+";MODE=PostgreSQL","sa","")) {
             RunScript.execute(c,Files.newBufferedReader(Path.of("../sql/create_bcomp_new.sql")));
             String[] args=new String[21];args[6]="1";args[7]="20260923";args[8]="first";args[9]="D";args[20]="20260922";
-            var context=new DailyResultPublisher.Context("客户表","存款组",1L,"sit",2L,"uat");
+            var context=new DailyResultPublisher.Context("客户表","dept",1L,"sit",2L,"uat");
             var result=new ResultAggregate(2);result.matched=100;
             result.difference("3","A",()->SampleRow.of("A","3",List.of("ID"),new String[]{"A"},null,List.of()));
             insertTask(c,args);DailyResultPublisher.publish(c,args,context,result);
             assertEquals(101,count(c,"SELECT ORIGIN_COUNT FROM TSS_BCOMP_RESULT_NEW"));
-            assertEquals("存款组",value(c,"SELECT CONFIGURATION_MODULE FROM TSS_BCOMP_RESULT_NEW"));
+            assertEquals("dept",value(c,"SELECT CONFIGURATION_MODULE FROM TSS_BCOMP_RESULT_NEW"));
             assertEquals(1,count(c,"SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW"));
             assertThrows(SQLException.class,()->DailyResultPublisher.publish(c,args,context,result));
             args[8]="cancelled";insertTask(c,args);
@@ -44,7 +44,7 @@ class DailyResultPublisherTest {
         try(var c=DriverManager.getConnection("jdbc:h2:mem:"+UUID.randomUUID()+";MODE=PostgreSQL","sa","")) {
             RunScript.execute(c,Files.newBufferedReader(Path.of("../sql/create_bcomp_new.sql")));
             String[] args=new String[21];args[6]="1";args[7]="20260923";args[8]="first";args[9]="D";args[20]="20260922";
-            var context=new DailyResultPublisher.Context("A表","贷款组",1L,"sit",2L,"uat");
+            var context=new DailyResultPublisher.Context("A表","loan",1L,"sit",2L,"uat");
             var result=new ResultAggregate(2);
             for(int i=0;i<3;i++) { String key="a"+i;result.difference("4",key,List.of("a"),()->SampleRow.of(key,"4",List.of("a","b"),new String[]{"1","1"},new String[]{"2","1"},List.of("a"))); }
             for(int i=0;i<4;i++) { String key="ab"+i;result.difference("4",key,List.of("a","b"),()->SampleRow.of(key,"4",List.of("a","b"),new String[]{"1","1"},new String[]{"2","2"},List.of("a","b"))); }

@@ -7,7 +7,7 @@ TRUNCATE TABLE tss_bcomp_conf_new;
 INSERT INTO tss_bcomp_conf_new
   (bcomp_index,bcomp_module,bcomp_name,bcomp_memo,bcomp_type,bcomp_range,bcomp_time_node,bcomp_state,bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit)
 VALUES
-(1,'存款组','acct_master','账户主表比对','2','1','3','1',16,'HASH',37);
+(1,'dept','acct_master','账户主表比对','2','1','3','1',16,'HASH',37);
 
 INSERT INTO tss_bcomp_field_new
   (bcomp_index,field_name,field_type,field_memo,field_old_index,field_new_index,field_index_flag,field_enum_flag)
