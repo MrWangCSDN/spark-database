@@ -37,6 +37,9 @@ public class BatchController {
     @GetMapping("/{batchId}")
     public BatchSummary find(@PathVariable String batchId) { return service.find(batchId); }
 
+    @PostMapping("/{batchId}/cancel")
+    public BatchSummary cancel(@PathVariable String batchId) { return service.cancel(batchId); }
+
     @GetMapping("/{batchId}/tasks")
     public PageResult<TaskSummary> tasks(@PathVariable String batchId,
                                          @RequestParam(defaultValue="ALL") String status,

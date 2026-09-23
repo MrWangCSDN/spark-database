@@ -1,6 +1,7 @@
 package cn.sunline.tss.compare.batch;
 
 import cn.sunline.tss.compare.ControlPlaneLock;
+import cn.sunline.tss.compare.JobLauncher;
 import cn.sunline.tss.compare.api.ApiException;
 import cn.sunline.tss.compare.api.PageResult;
 import cn.sunline.tss.compare.configuration.CacheReloader;
@@ -27,18 +28,20 @@ public class BatchService {
     private static final Pattern SIMPLE = Pattern.compile("[A-Za-z0-9_.-]{1,20}");
     private static final Pattern REQUEST_ID = Pattern.compile("[A-Za-z0-9_.:-]{1,64}");
     private static final Pattern FINGERPRINT = Pattern.compile("[a-f0-9]{64}");
-    private static final Set<String> STATUSES = Set.of("ALL", "WAITING", "RUNNING", "CONSISTENT", "DIFFERENCE", "FAILED", "OTHER");
+    private static final Set<String> STATUSES = Set.of("ALL", "WAITING", "RUNNING", "CONSISTENT", "DIFFERENCE", "FAILED", "CANCELLED", "OTHER");
     private static final Set<String> FIELD_TYPES = Set.of("1", "2", "3", "4");
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private final BatchRepository repository;
     private final CacheReloader cache;
     private final Environment environment;
+    private final JobLauncher launcher;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public BatchService(BatchRepository repository, CacheReloader cache, Environment environment) {
+    public BatchService(BatchRepository repository, CacheReloader cache, Environment environment, JobLauncher launcher) {
         this.repository = repository;
         this.cache = cache;
         this.environment = environment;
+        this.launcher = launcher;
     }
 
     public BatchPreview preview(BatchRequest request) {
@@ -96,6 +99,16 @@ public class BatchService {
         var batch = repository.find(id);
         if (batch == null) throw ApiException.notFound("BATCH_NOT_FOUND", "核对批次不存在");
         return batch;
+    }
+
+    public BatchSummary cancel(String id) {
+        find(id);
+        BatchSummary result=repository.inTransaction(() -> {
+            repository.cancel(id);
+            return repository.find(id);
+        });
+        launcher.cancelBatch(id);
+        return result;
     }
 
     public PageResult<BatchSummary> list(int page, int size) {

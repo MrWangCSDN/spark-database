@@ -21,7 +21,7 @@ export interface DatabaseConnectionTestResult { success: boolean; databaseProduc
 export interface ApiError { code: string; message: string; traceId: string }
 
 export type BatchScope = 'ALL' | 'SELECTED' | 'FAILED'
-export type BatchTaskStatus = 'ALL' | 'WAITING' | 'RUNNING' | 'CONSISTENT' | 'DIFFERENCE' | 'FAILED' | 'OTHER'
+export type BatchTaskStatus = 'ALL' | 'WAITING' | 'RUNNING' | 'CONSISTENT' | 'DIFFERENCE' | 'FAILED' | 'CANCELLED' | 'OTHER'
 export interface BatchRequest {
   scope: BatchScope; configurationIds?: number[]; excludedIds?: number[]; taskBusinessDate?: string;
   verifyBusinessDate?: string; timeNode?: string; sourceBatchId?: string; requestId?: string; previewFingerprint?: string
@@ -37,7 +37,7 @@ export interface BatchPreview {
 export interface BatchSummary {
   batchId: string; taskBusinessDate: string; verifyBusinessDate: string | null; createdAt: string; sourceBatchId: string | null;
   totalCount: number; waitingCount: number; runningCount: number; consistentCount: number; differenceCount: number;
-  failedCount: number; otherCount: number; endedCount: number
+  failedCount: number; cancelledCount: number; otherCount: number; endedCount: number
 }
 export interface BatchRuntime { tasksEnabled: boolean; concurrency: number; maxBatchSize: number }
 

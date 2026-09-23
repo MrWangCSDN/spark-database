@@ -19,6 +19,10 @@ class DailyResultPublisherTest {
             assertEquals(101,count(c,"SELECT ORIGIN_COUNT FROM TSS_BCOMP_RESULT_NEW"));
             assertEquals(1,count(c,"SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW"));
             assertThrows(SQLException.class,()->DailyResultPublisher.publish(c,args,context,result));
+            args[8]="cancelled";insertTask(c,args);
+            try(var ps=c.prepareStatement("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='5' WHERE TASK_BATCH='cancelled'")){ps.executeUpdate();}
+            assertThrows(SQLException.class,()->DailyResultPublisher.publish(c,args,context,result));
+            assertEquals(101,count(c,"SELECT ORIGIN_COUNT FROM TSS_BCOMP_RESULT_NEW"));
             args[8]="second";insertTask(c,args);
             try(var s=c.createStatement()){s.execute("ALTER TABLE TSS_BCOMP_DTL_NEW ADD CONSTRAINT no_samples CHECK(COMP_INDEX_STR<>'B')");}
             var failed=new ResultAggregate(2);

@@ -23,7 +23,7 @@ public class BatchRepository {
          LEFT JOIN TSS_BCOMP_TASK_NEW t ON t.TASK_BATCH=b.BATCH_ID
            AND t.TASK_BUSI_DATE=b.TASK_BUSI_DATE AND t.BCOMP_INDEX=i.BCOMP_INDEX
         """;
-    private static final String KNOWN_STATE = "(t.TASK_STATE IN ('1','2','4') OR (t.TASK_STATE='3' AND t.TASK_RESULT IN ('1','2')))";
+    private static final String KNOWN_STATE = "(t.TASK_STATE IN ('1','2','4','5') OR (t.TASK_STATE='3' AND t.TASK_RESULT IN ('1','2')))";
     private static final String SUMMARY_SELECT = """
         SELECT b.BATCH_ID,b.TASK_BUSI_DATE,b.VERIFY_BUSINESS_DATE,b.CREATED_AT,b.SOURCE_BATCH_ID,b.TOTAL_COUNT,
           SUM(CASE WHEN t.TASK_STATE='1' THEN 1 ELSE 0 END),
@@ -31,6 +31,7 @@ public class BatchRepository {
           SUM(CASE WHEN t.TASK_STATE='3' AND t.TASK_RESULT='2' THEN 1 ELSE 0 END),
           SUM(CASE WHEN t.TASK_STATE='3' AND t.TASK_RESULT='1' THEN 1 ELSE 0 END),
           SUM(CASE WHEN t.TASK_STATE='4' THEN 1 ELSE 0 END),
+          SUM(CASE WHEN t.TASK_STATE='5' THEN 1 ELSE 0 END),
           SUM(CASE WHEN
         """ + KNOWN_STATE + " THEN 0 ELSE 1 END) " + ITEM_JOIN;
     private static final String SUMMARY_GROUP = " GROUP BY b.BATCH_ID,b.TASK_BUSI_DATE,b.VERIFY_BUSINESS_DATE,b.CREATED_AT,b.SOURCE_BATCH_ID,b.TOTAL_COUNT ";
@@ -118,6 +119,15 @@ public class BatchRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    void cancel(String batchId) {
+        jdbc.update("""
+            UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='5',TASK_RESULT=NULL,
+              FTASK_REASON='用户停止批次',END_DATETIME=?
+            WHERE TASK_BATCH=? AND TASK_BUSI_DATE=(SELECT TASK_BUSI_DATE FROM TSS_BCOMP_BATCH_NEW WHERE BATCH_ID=?)
+              AND TASK_STATE IN ('1','2')
+            """, java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")), batchId, batchId);
+    }
+
     PageResult<BatchSummary> list(int page, int size) {
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_BATCH_NEW", Long.class);
         var items = jdbc.query(SUMMARY_SELECT + SUMMARY_GROUP + " ORDER BY b.CREATED_AT DESC,b.BATCH_ID DESC OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
@@ -132,6 +142,7 @@ public class BatchRepository {
             case "CONSISTENT" -> " AND t.TASK_STATE='3' AND t.TASK_RESULT='2'";
             case "DIFFERENCE" -> " AND t.TASK_STATE='3' AND t.TASK_RESULT='1'";
             case "FAILED" -> " AND t.TASK_STATE='4'";
+            case "CANCELLED" -> " AND t.TASK_STATE='5'";
             case "OTHER" -> " AND CASE WHEN " + KNOWN_STATE + " THEN 0 ELSE 1 END=1";
             default -> "";
         };
@@ -162,7 +173,7 @@ public class BatchRepository {
     }
     private static BatchSummary summary(ResultSet rs) throws SQLException {
         return new BatchSummary(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
-            rs.getInt(6), rs.getInt(7), rs.getInt(8), rs.getInt(9), rs.getInt(10), rs.getInt(11), rs.getInt(12), rs.getInt(9)+rs.getInt(10)+rs.getInt(11));
+            rs.getInt(6), rs.getInt(7), rs.getInt(8), rs.getInt(9), rs.getInt(10), rs.getInt(11), rs.getInt(12), rs.getInt(13), rs.getInt(9)+rs.getInt(10)+rs.getInt(11)+rs.getInt(12));
     }
 
     record Configuration(Map<String, String> values, List<Map<String, String>> fields) {

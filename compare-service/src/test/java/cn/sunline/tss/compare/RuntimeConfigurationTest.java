@@ -2,6 +2,7 @@ package cn.sunline.tss.compare;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
+import java.util.concurrent.CancellationException;
 import static org.assertj.core.api.Assertions.*;
 
 class RuntimeConfigurationTest {
@@ -20,5 +21,11 @@ class RuntimeConfigurationTest {
         assertThat(SparkJobLauncher.tableMainClass("cn.sunline.tss.tssveri.spark.SparkHandlerFile,"+table)).isEqualTo(table);
         assertThat(SparkJobLauncher.tableMainClass(table)).isEqualTo(table);
         assertThatThrownBy(() -> SparkJobLauncher.tableMainClass("file,")).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void cancelledBatchCannotLaunchNewSparkApplication() {
+        var launcher=new SparkJobLauncher(new MockEnvironment());
+        launcher.cancelBatch("cancelled-batch");
+        String[] args=new String[21];args[8]="cancelled-batch";
+        assertThatThrownBy(() -> launcher.submit(args)).isInstanceOf(CancellationException.class);
     }
 }

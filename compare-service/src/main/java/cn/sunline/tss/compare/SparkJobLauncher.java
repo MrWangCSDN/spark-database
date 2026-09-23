@@ -15,9 +15,20 @@ import java.util.concurrent.*;
 public class SparkJobLauncher implements JobLauncher {
     private static final Logger log=LoggerFactory.getLogger(SparkJobLauncher.class);
     private final Environment env;
+    private final Set<String> cancelledBatches=ConcurrentHashMap.newKeySet();
+    private final ConcurrentMap<String,Set<SparkAppHandle>> activeByBatch=new ConcurrentHashMap<>();
     public SparkJobLauncher(Environment env) { this.env=env; }
+    @Override public void cancelBatch(String batchId) {
+        cancelledBatches.add(batchId);
+        for(SparkAppHandle handle:activeByBatch.getOrDefault(batchId,Set.of())) {
+            try { handle.kill(); }
+            catch(RuntimeException error) { log.warn("无法终止批次 {} 的 Spark 应用，需检查集群应用终态",batchId); }
+        }
+    }
     @Override public void submit(String[] args) throws Exception {
         if(args==null || args.length!=21) throw new IllegalArgumentException("Spark库表作业必须传入21个参数");
+        String batchId=args[8];
+        if(cancelledBatches.contains(batchId)) throw new CancellationException("批次已停止");
         String resource=env.getRequiredProperty("app_resource");
         if(!Files.isRegularFile(Path.of(resource))) throw new IllegalArgumentException("app_resource 指定的作业包不存在");
         Map<String,String> childEnv=new HashMap<>();
@@ -57,7 +68,12 @@ public class SparkJobLauncher implements JobLauncher {
             }
             @Override public void infoChanged(SparkAppHandle app) { }
         });
+        activeByBatch.computeIfAbsent(batchId,unused -> ConcurrentHashMap.newKeySet()).add(handle);
         try {
+            if(cancelledBatches.contains(batchId)) {
+                handle.kill();
+                throw new CancellationException("批次已停止");
+            }
             long timeout=env.getProperty("compare.spark-timeout-seconds",Long.class,0L);
             if(timeout>0) {
                 if(!finished.await(timeout,TimeUnit.SECONDS)) throw new TimeoutException("Spark作业超过配置时限");
@@ -65,7 +81,10 @@ public class SparkJobLauncher implements JobLauncher {
             if(handle.getState()!=SparkAppHandle.State.FINISHED) throw new IllegalStateException("Spark终态="+handle.getState());
         } catch(InterruptedException | TimeoutException e) {
             handle.kill(); throw e;
-        } finally { handle.disconnect(); }
+        } finally {
+            activeByBatch.getOrDefault(batchId,Set.of()).remove(handle);
+            handle.disconnect();
+        }
     }
     static String tableMainClass(String configured) {
         String[] classes=configured.split(",",-1);

@@ -30,6 +30,22 @@ test('does not offer retry when a batch contains differences but no failed tasks
   expect(screen.queryByRole('link', { name: /重新发起失败项/ })).not.toBeInTheDocument()
 })
 
+test('stops only after confirmation and shows cancelled tasks', async () => {
+  let stopped = false
+  server.use(
+    http.get('/api/batches/:batchId', () => HttpResponse.json(stopped ? { ...batch, waitingCount: 0, runningCount: 0, cancelledCount: 50, endedCount: 200 } : batch)),
+    http.post('/api/batches/:batchId/cancel', () => { stopped = true; return HttpResponse.json({ ...batch, waitingCount: 0, runningCount: 0, cancelledCount: 50, endedCount: 200 }) })
+  )
+  const user = userEvent.setup(); renderDetail()
+  await user.click(await screen.findByRole('button', { name: '停止批次' }))
+  expect(stopped).toBe(false)
+  expect(screen.getByText('等待和运行中的任务将取消；已完成结果保留，其他批次继续执行。')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: '确认停止' }))
+  await waitFor(() => expect(stopped).toBe(true))
+  await waitFor(() => expect(screen.getByRole('button', { name: '已取消 50' })).toBeVisible())
+  expect(screen.queryByRole('button', { name: '停止批次' })).not.toBeInTheDocument()
+})
+
 test('keeps missing historical entries visible without linking to a nonexistent task', async () => {
   server.use(http.get('/api/batches/:batchId/tasks', () => HttpResponse.json({ items: [{ ...task, taskState: null }], page: 0, size: 20, total: 1 })))
   renderDetail()

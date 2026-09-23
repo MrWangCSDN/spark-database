@@ -46,7 +46,7 @@ export function TasksPage() {
     <FilterBar onSubmit={applyFilters} onReset={resetFilters}>
       <label>关键词<input aria-label="关键词" placeholder="配置名称或批次" value={draft.keyword} onChange={event => update('keyword', event.target.value)} /></label>
       <label>配置编号<input aria-label="配置编号" inputMode="numeric" value={draft.bcompIndex} onChange={event => update('bcompIndex', event.target.value)} /></label>
-      <label>任务状态<select aria-label="任务状态" value={draft.taskState} onChange={event => update('taskState', event.target.value)}><option value="">全部状态</option><option value="1">等待</option><option value="2">运行中</option><option value="3">完成</option><option value="4">失败</option></select></label>
+      <label>任务状态<select aria-label="任务状态" value={draft.taskState} onChange={event => update('taskState', event.target.value)}><option value="">全部状态</option><option value="1">等待</option><option value="2">运行中</option><option value="3">完成</option><option value="4">失败</option><option value="5">已取消</option></select></label>
       <label>核对结果<select aria-label="核对结果" value={draft.taskResult} onChange={event => update('taskResult', event.target.value)}><option value="">全部结果</option><option value="2">一致</option><option value="1">有差异 / 失败</option></select></label>
       <label>开始日期<input aria-label="开始日期" placeholder="YYYYMMDD" value={draft.dateFrom} onChange={event => update('dateFrom', event.target.value)} /></label>
       <label>结束日期<input aria-label="结束日期" placeholder="YYYYMMDD" value={draft.dateTo} onChange={event => update('dateTo', event.target.value)} /></label>

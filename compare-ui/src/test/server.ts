@@ -9,7 +9,7 @@ export const task = {
   file1FailureCount: null, file2FailureCount: null, readMode: '1'
 }
 
-export const batch = { batchId: '20260922-001', taskBusinessDate: '20260922', verifyBusinessDate: '20260922', createdAt: '20260922120000', sourceBatchId: null, totalCount: 200, waitingCount: 49, runningCount: 1, consistentCount: 142, differenceCount: 6, failedCount: 2, otherCount: 0, endedCount: 150 }
+export const batch = { batchId: '20260922-001', taskBusinessDate: '20260922', verifyBusinessDate: '20260922', createdAt: '20260922120000', sourceBatchId: null, totalCount: 200, waitingCount: 49, runningCount: 1, consistentCount: 142, differenceCount: 6, failedCount: 2, cancelledCount: 0, otherCount: 0, endedCount: 150 }
 export const handlers = [
   http.get('/api/tasks/8/20260920/1/D/database-context', () => HttpResponse.json({ originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' })),
   http.get('/api/batches/runtime', () => HttpResponse.json({ tasksEnabled: true, concurrency: 1, maxBatchSize: 5000 })),

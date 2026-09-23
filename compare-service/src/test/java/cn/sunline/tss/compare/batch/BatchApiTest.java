@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -34,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BatchApiTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final AtomicBoolean cacheFails = new AtomicBoolean();
+    private final AtomicReference<String> cancelledBatch = new AtomicReference<>();
     private JdbcTemplate jdbc;
     private MockMvc mvc;
 
@@ -43,7 +45,11 @@ class BatchApiTest {
         new ResourceDatabasePopulator(new FileSystemResource("../sql/create_bcomp_new.sql")).execute(source);
         jdbc = new JdbcTemplate(source);
         CacheReloader cache = () -> { if (cacheFails.get()) throw new IllegalStateException("secret-jdbc-message"); };
-        var service = new BatchService(new BatchRepository(source, 30), cache, new MockEnvironment());
+        cn.sunline.tss.compare.JobLauncher launcher = new cn.sunline.tss.compare.JobLauncher() {
+            @Override public void submit(String[] args) { }
+            @Override public void cancelBatch(String batchId) { cancelledBatch.set(batchId); }
+        };
+        var service = new BatchService(new BatchRepository(source, 30), cache, new MockEnvironment(), launcher);
         var configurationService = new ConfigurationService(new ConfigurationRepository(source, 30), cache);
         mvc = MockMvcBuilders.standaloneSetup(new BatchController(service), new ConfigurationController(configurationService))
             .setControllerAdvice(new ApiExceptionHandler()).build();
@@ -239,6 +245,36 @@ class BatchApiTest {
             .andExpect(jsonPath("$.items[0].totalCount").value(1));
         mvc.perform(get("/api/batches").param("size", "101")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/batches/missing")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void stoppingBatchCancelsOnlyActiveItemsAndIsIdempotent() throws Exception {
+        configurations(3);
+        var request = request("ALL");
+        String batchId = create(submission(request, preview(request))).path("batchId").asText();
+        var otherRequest = request("ALL").put("taskBusinessDate", "20260923");
+        String otherBatchId = create(submission(otherRequest, preview(otherRequest))).path("batchId").asText();
+        jdbc.update("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='2' WHERE BCOMP_INDEX=2 AND TASK_BATCH=?", batchId);
+        jdbc.update("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='3',TASK_RESULT='2' WHERE BCOMP_INDEX=3 AND TASK_BATCH=?", batchId);
+
+        for (int attempt=0; attempt<2; attempt++) {
+            mvc.perform(post("/api/batches/" + batchId + "/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cancelledCount").value(2))
+                .andExpect(jsonPath("$.consistentCount").value(1))
+                .andExpect(jsonPath("$.endedCount").value(3));
+        }
+        assertThat(jdbc.queryForList("SELECT TASK_STATE FROM TSS_BCOMP_TASK_NEW WHERE TASK_BATCH=? ORDER BY BCOMP_INDEX", String.class, batchId))
+            .containsExactly("5", "5", "3");
+        assertThat(jdbc.queryForList("SELECT TASK_STATE FROM TSS_BCOMP_TASK_NEW WHERE TASK_BATCH=? ORDER BY BCOMP_INDEX", String.class, otherBatchId))
+            .containsExactly("1", "1", "1");
+        assertThat(cancelledBatch.get()).isEqualTo(batchId);
+        mvc.perform(get("/api/batches/" + batchId + "/tasks").param("status", "CANCELLED"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2));
+        mvc.perform(get("/api/batches/" + batchId + "/tasks").param("status", "FAILED"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+        mvc.perform(post("/api/batches/missing/cancel"))
+            .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("BATCH_NOT_FOUND"));
     }
 
     @Test
