@@ -2,6 +2,18 @@ import type { TaskDatabaseContext } from '../api/types'
 
 export interface DatabaseLabels { origin: string; destination: string }
 
+const domainNames: Record<string, string> = {
+  comm: '公共组',
+  dept: '存款组',
+  loan: '贷款组',
+  sett: '结算组',
+}
+
+export function domainLabel(module: string | null | undefined): string {
+  const code = module?.trim()
+  return code ? domainNames[code.toLowerCase()] ?? code : '—'
+}
+
 export function databaseLabels(context?: TaskDatabaseContext): DatabaseLabels {
   const { originDatabaseId: a, originDatabaseName: aName, destinationDatabaseId: b, destinationDatabaseName: bName } = context ?? {}
   let origin = aName?.trim() || (a != null ? `数据库 #${a}` : '数据库 A（名称不可用）')

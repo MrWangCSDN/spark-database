@@ -1,4 +1,13 @@
-import { databaseLabels, differenceLabel, differenceReason } from './labels'
+import { databaseLabels, differenceLabel, differenceReason, domainLabel } from './labels'
+
+test('shows configured modules as Chinese domains without losing unknown values', () => {
+  expect(domainLabel('comm')).toBe('公共组')
+  expect(domainLabel(' DEPT ')).toBe('存款组')
+  expect(domainLabel('loan')).toBe('贷款组')
+  expect(domainLabel('sett')).toBe('结算组')
+  expect(domainLabel('other')).toBe('other')
+  expect(domainLabel(null)).toBe('—')
+})
 
 const names = databaseLabels({ originDatabaseId: 10, originDatabaseName: 'sit', destinationDatabaseId: 20, destinationDatabaseName: 'uat' })
 test('maps actual Spark codes and the database missing a record', () => {
