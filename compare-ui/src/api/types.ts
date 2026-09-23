@@ -48,7 +48,7 @@ export interface TaskDatabaseContext {
 
 export interface DailyResult extends TaskDatabaseContext {
   bcompIndex: number; resultDate: string; runId: string; taskBusiDate: string; taskBatch: string; timeNode: string;
-  configurationName: string; originCount: number; destinationCount: number; matchedCount: number;
+  configurationName: string; configurationModule: string | null; originCount: number; destinationCount: number; matchedCount: number;
   onlyOriginCount: number; onlyDestinationCount: number; differentCount: number; detailLimit: number;
   originSamples: number; destinationSamples: number; differentSamples: number; publishedAt: string; detailsExpired: string
 }

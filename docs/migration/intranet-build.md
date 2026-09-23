@@ -30,6 +30,8 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 ## 构建与验收
 
+升级已有元数据库时，先在 bd 服务与 Spark 使用的 schema 执行 `sql/add_bcomp_result_module_new.sql`，再替换服务和 Spark JAR。新建环境直接使用包含领域列的 `sql/create_bcomp_new.sql`。历史结果的领域为空；新导入 Axon 配置并成功运行后，每日结果才会保存领域快照。
+
 ```bash
 unzip tss-compare-source-1.0.0-SNAPSHOT.zip
 cd tss-compare-source-1.0.0-SNAPSHOT

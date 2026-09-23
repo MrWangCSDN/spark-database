@@ -159,6 +159,7 @@ class ConfigurationApiTest {
             .andExpect(jsonPath("$.fieldCount").value(3));
         assertThat(jdbc.queryForObject("select BCOMP_PARTITION_NUM from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1", Integer.class)).isEqualTo(16);
         assertThat(jdbc.queryForObject("select BCOMP_SAMPLE_LIMIT from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1", Integer.class)).isEqualTo(37);
+        assertThat(jdbc.queryForObject("select BCOMP_MODULE from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1", String.class)).isEqualTo("存款组");
         assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_FIELD_NEW where BCOMP_INDEX=1 and FIELD_INDEX_FLAG='1'", Integer.class)).isEqualTo(2);
     }
 

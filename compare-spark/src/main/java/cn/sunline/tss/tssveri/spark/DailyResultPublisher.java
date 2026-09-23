@@ -7,13 +7,13 @@ import java.util.UUID;
 
 /** Publish summary, bounded samples and task completion in one metadata transaction. */
 final class DailyResultPublisher {
-    record Context(String name,Long originId,String originName,Long destinationId,String destinationName) {}
+    record Context(String name,String module,Long originId,String originName,Long destinationId,String destinationName) {}
     static Context context(Connection connection,long index) throws SQLException {
-        try(var ps=connection.prepareStatement("SELECT c.BCOMP_NAME,s.ORIG_DATABASE_ID,o.DATABASE_NAME,s.DEST_DATABASE_ID,d.DATABASE_NAME FROM TSS_BCOMP_CONF_NEW c JOIN TSS_BCOMP_TABLE_SQL_NEW s ON s.BCOMP_INDEX=c.BCOMP_INDEX LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW o ON o.DATABASE_ID=s.ORIG_DATABASE_ID LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d ON d.DATABASE_ID=s.DEST_DATABASE_ID WHERE c.BCOMP_INDEX=?")) {
+        try(var ps=connection.prepareStatement("SELECT c.BCOMP_NAME,c.BCOMP_MODULE,s.ORIG_DATABASE_ID,o.DATABASE_NAME,s.DEST_DATABASE_ID,d.DATABASE_NAME FROM TSS_BCOMP_CONF_NEW c JOIN TSS_BCOMP_TABLE_SQL_NEW s ON s.BCOMP_INDEX=c.BCOMP_INDEX LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW o ON o.DATABASE_ID=s.ORIG_DATABASE_ID LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d ON d.DATABASE_ID=s.DEST_DATABASE_ID WHERE c.BCOMP_INDEX=?")) {
             ps.setLong(1,index);
             try(var rs=ps.executeQuery()) {
                 if(!rs.next()) throw new SQLException("任务结果配置不存在");
-                return new Context(rs.getString(1),rs.getObject(2,Long.class),rs.getString(3),rs.getObject(4,Long.class),rs.getString(5));
+                return new Context(rs.getString(1),rs.getString(2),rs.getObject(3,Long.class),rs.getString(4),rs.getObject(5,Long.class),rs.getString(6));
             }
         }
     }
@@ -44,8 +44,8 @@ final class DailyResultPublisher {
                 try(var ps=c.prepareStatement("DELETE FROM "+table+" WHERE BCOMP_INDEX=? AND RESULT_DATE=?")) { ps.setLong(1,index);ps.setString(2,date);ps.executeUpdate(); }
             }
             String runId=UUID.randomUUID().toString();
-            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,DETAILS_EXPIRED) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'0')")) {
-                int i=1;ps.setLong(i++,index);ps.setString(i++,date);ps.setString(i++,runId);ps.setString(i++,args[7]);ps.setString(i++,args[8]);ps.setString(i++,args[9]);ps.setString(i++,context.name());
+            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,CONFIGURATION_MODULE,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,DETAILS_EXPIRED) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'0')")) {
+                int i=1;ps.setLong(i++,index);ps.setString(i++,date);ps.setString(i++,runId);ps.setString(i++,args[7]);ps.setString(i++,args[8]);ps.setString(i++,args[9]);ps.setString(i++,context.name());ps.setString(i++,context.module());
                 ps.setObject(i++,context.originId());ps.setString(i++,context.originName());ps.setObject(i++,context.destinationId());ps.setString(i++,context.destinationName());
                 ps.setLong(i++,result.originCount());ps.setLong(i++,result.destinationCount());ps.setLong(i++,result.matched);ps.setLong(i++,result.onlyOrigin);ps.setLong(i++,result.onlyDestination);ps.setLong(i++,result.different);
                 ps.setInt(i++,result.limit);ps.setInt(i++,result.samples("3").size());ps.setInt(i++,result.samples("2").size());ps.setInt(i++,result.patternSampleCount());ps.setString(i,now);ps.executeUpdate();

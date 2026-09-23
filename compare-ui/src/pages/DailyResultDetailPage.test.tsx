@@ -6,7 +6,7 @@ import { server } from '../test/server'
 import { DailyResultDetailPage } from './DailyResultDetailPage'
 import { DailyResultsPage } from './DailyResultsPage'
 
-export const daily = { bcompIndex: 1, resultDate: '20260920', runId: 'v1', taskBusiDate: '20260921', taskBatch: 'b1', timeNode: 'D', configurationName: '客户表', originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat', originCount: 1000005, destinationCount: 2000005, matchedCount: 3, onlyOriginCount: 1000000, onlyDestinationCount: 2000000, differentCount: 2, detailLimit: 1000, originSamples: 1000, destinationSamples: 1000, differentSamples: 2, publishedAt: '20260922120000', detailsExpired: '0' }
+export const daily = { bcompIndex: 1, resultDate: '20260920', runId: 'v1', taskBusiDate: '20260921', taskBatch: 'b1', timeNode: 'D', configurationName: '客户表', configurationModule: '存款组', originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat', originCount: 1000005, destinationCount: 2000005, matchedCount: 3, onlyOriginCount: 1000000, onlyDestinationCount: 2000000, differentCount: 2, detailLimit: 1000, originSamples: 1000, destinationSamples: 1000, differentSamples: 2, publishedAt: '20260922120000', detailsExpired: '0' }
 function mock(expired = false, patterns: Array<{ patternId: string; fields: string[]; differentCount: number; sampleCount: number }> = [
   { patternId: 'balance', fields: ['balance'], differentCount: 1, sampleCount: 1 },
   { patternId: 'balance-status', fields: ['balance', 'status'], differentCount: 1, sampleCount: 1 }
@@ -98,6 +98,8 @@ test('shows daily table totals with named connections', async () => {
   mock()
   renderPage(<DailyResultsPage />, '/results?date=20260920')
   expect(await screen.findByText('客户表')).toBeVisible()
+  expect(screen.getByRole('columnheader', { name: '领域' })).toBeVisible()
+  expect(screen.getByText('存款组')).toBeVisible()
   expect(screen.getByText('sit 总量')).toBeVisible()
   expect(screen.getByText('uat 总量')).toBeVisible()
   expect(screen.getByText('1,000,005')).toBeVisible()
