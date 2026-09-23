@@ -27,22 +27,22 @@
 
 **Files:** `compare-spark/src/main/java/cn/sunline/tss/tssveri/spark/{SampleRow,SparkHandlerTable}.java`, `compare-spark/src/test/java/cn/sunline/tss/tssveri/spark/ResultAggregateTest.java`
 
-- [ ] Add a failing test for Chinese label, fallback, and JSON output.
-- [ ] Run the focused test and confirm failure.
-- [ ] Implement bounded label snapshot from FIELD_MEMO.
-- [ ] Run Spark tests and commit.
+- [x] Add a failing test for Chinese label, fallback, and JSON output.
+- [x] Run the focused test and confirm failure.
+- [x] Implement bounded label snapshot from FIELD_MEMO.
+- [x] Run Spark tests and commit.
 
 ### Task 2: Direct sample grid
 
 **Files:** `compare-ui/src/pages/DailyResultDetailPage.tsx`, `compare-ui/src/api/types.ts`, `compare-ui/src/styles/layout.css`, `compare-ui/src/pages/DailyResultDetailPage.test.tsx`
 
-- [ ] Update tests for direct side-only rows and automatic largest-pattern display.
-- [ ] Run focused tests and confirm failure.
-- [ ] Implement the wide scrollable table, 100-row fetch, dynamic pair cells and inline truncation notice.
-- [ ] Run UI tests/build and commit.
+- [x] Update tests for direct side-only rows and automatic largest-pattern display.
+- [x] Run focused tests and confirm failure.
+- [x] Implement the wide scrollable table, 100-row fetch, dynamic pair cells and inline truncation notice.
+- [x] Run UI tests/build and commit.
 
 ### Task 3: Visual preview and integration
 
-- [ ] Update temporary mock data with labels and inspect side-only and pattern screenshots.
-- [ ] Run relevant backend/UI suites and clean-build the backend JAR with frontend embedded.
-- [ ] Update README and Obsidian design, verify diffs, commit/push documentation.
+- [x] Update temporary mock data with labels and inspect side-only and pattern screenshots.
+- [x] Run relevant backend/UI suites and clean-build the backend JAR with frontend embedded.
+- [x] Update README and Obsidian design, verify diffs, commit/push documentation.

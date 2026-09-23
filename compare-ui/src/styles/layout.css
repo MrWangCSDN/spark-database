@@ -71,7 +71,19 @@ td strong { display: block; }.row-link { color: var(--accent); font-weight: 750;
 .daily-date-form label { display:grid; gap:8px; }
 
 .daily-results-page th, .daily-result-page th { text-transform:none; }
-.daily-result-page { max-width: 1720px; }
+.daily-result-page { max-width: 1720px; padding-top: 20px; }
+.daily-result-page .back-link { margin-bottom: 10px; }
+.daily-result-page .page-heading { min-height: 0; margin-bottom: 0; padding-bottom: 12px; }
+.daily-result-page .page-heading h1 { margin: 2px 0 4px; font-size: clamp(22px, 2vw, 27px); }
+.daily-result-page .page-heading p { margin: 0; font-size: 12px; }
+.daily-result-page .facts { border-top: 0; }
+.daily-result-page .facts > div { padding: 10px 14px; }
+.daily-result-page .facts strong { margin-top: 3px; }
+.daily-result-page .detail-tabs { margin-top: 12px; }
+.daily-result-page .detail-tabs button { min-height: 38px; }
+.daily-result-page .detail-panel { padding-top: 12px; }
+.daily-result-page .section-heading { margin-bottom: 10px; }
+.daily-result-page .section-heading h2 { margin-bottom: 4px; }
 .daily-patterns { margin-bottom: 22px; }
 .daily-patterns tbody tr { cursor: pointer; }
 .daily-patterns tbody tr.selected { background: var(--surface-2); }
@@ -79,8 +91,9 @@ td strong { display: block; }.row-link { color: var(--accent); font-weight: 750;
 .pattern-switch { width: 100%; min-height: 26px; padding: 0; border: 0; background: none; color: var(--text-strong); font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
 .daily-patterns tr.selected .pattern-switch { color: var(--accent); }
 .daily-result-page h3 { margin: 20px 0 12px; font-size: 15px; }
-.daily-sample-grid { max-height: min(68vh, 720px); min-height: 280px; overflow: auto; }
+.daily-sample-grid { max-height: min(74vh, 820px); min-height: 280px; overflow: auto; }
 .daily-sample-grid table { width: max-content; min-width: 100%; }
+.daily-sample-grid th, .daily-sample-grid td { padding-top: 9px; padding-bottom: 9px; }
 .daily-sample-grid th, .daily-sample-grid td { min-width: 150px; max-width: 380px; }
 .daily-sample-grid th:first-child, .daily-sample-grid td:first-child { position: sticky; left: 0; min-width: 190px; max-width: 260px; background: var(--surface); z-index: 2; }
 .daily-sample-grid th:first-child { z-index: 3; background: var(--surface-2); }
@@ -89,3 +102,9 @@ td strong { display: block; }.row-link { color: var(--accent); font-weight: 750;
 .sample-value-pair { display: grid; gap: 4px; white-space: normal; }
 .sample-value-pair span:first-child { color: var(--text-strong); }
 .sample-value-pair span:last-child { color: var(--accent); }
+@media (max-width: 560px) {
+  .daily-result-page .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .daily-result-page .facts > div:nth-child(2) { border-right: 0; }
+  .daily-result-page .detail-tabs { gap: 10px; overflow-x: auto; }
+  .daily-result-page .detail-tabs button { flex: 0 0 auto; font-size: 12px; }
+}
