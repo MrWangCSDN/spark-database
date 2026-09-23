@@ -37,7 +37,7 @@ bin/package.sh
 bin/package-source.sh
 ```
 
-需要送入内网重新构建时，使用 `bin/package-source.sh` 生成只包含已提交源码的 ZIP 和 SHA-256 校验文件。内网 Maven、npm 与 Node 镜像要求见 [`docs/migration/intranet-build.md`](docs/migration/intranet-build.md)。源码 ZIP 不包含依赖缓存，完全离线且没有企业制品镜像时不能单独完成构建。
+需要送入内网重新构建时，先在本机完成 `mvn verify`，再使用 `bin/package-source.sh` 生成包含已提交源码和预编译前端 `compare-ui/dist` 的 ZIP 与 SHA-256 校验文件。内网可用 `mvn -Dskip.installnodenpm=true -Dskip.npm=true clean verify` 构建后端和 Spark，前端不再重新编译；详见 [`docs/migration/intranet-build.md`](docs/migration/intranet-build.md)。源码 ZIP 不包含 Maven 依赖缓存，完全离线且没有企业制品镜像时不能单独完成构建。
 
 测试只使用隔离 H2 和前端模拟 API，不连接业务库：服务任务领取/并发、原21参数/AES、管理 API、刷新/失败回写、HTTP/SPA 启动，以及本地 Spark 相同/差异/缺行/重复键入库。H2测试表只在 `src/test` 中，不随服务发布。
 

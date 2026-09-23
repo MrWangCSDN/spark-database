@@ -20,6 +20,14 @@ mkdir -p "$staging_dir/$root_name"
 git archive HEAD | tar -x -C "$staging_dir/$root_name"
 git rev-parse HEAD > "$staging_dir/$root_name/SOURCE-COMMIT.txt"
 
+# Carry the already built frontend so the inner-network Maven build can skip Node/npm.
+test -s compare-ui/dist/index.html || {
+  printf '缺少已构建前端：请先在外网执行 mvn verify，再生成源码包。\n' >&2
+  exit 1
+}
+mkdir -p "$staging_dir/$root_name/compare-ui/dist"
+cp -R compare-ui/dist/. "$staging_dir/$root_name/compare-ui/dist/"
+
 required=(
   pom.xml
   compare-service/pom.xml
@@ -27,6 +35,7 @@ required=(
   compare-ui/package.json
   compare-ui/package-lock.json
   compare-ui/src/main.tsx
+  compare-ui/dist/index.html
   docs/migration/intranet-build.md
 )
 for file in "${required[@]}"; do

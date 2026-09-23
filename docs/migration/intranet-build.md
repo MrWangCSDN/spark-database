@@ -2,9 +2,9 @@
 
 ## 源码包内容
 
-源码 ZIP 同时包含 `compare-service`、`compare-spark` 和 `compare-ui`。前端不需要单独发布；构建 `compare-service` 时，`frontend-maven-plugin` 会安装固定版本 Node/npm、执行 `npm ci`、运行 Vitest、执行 Vite 构建，并把 `compare-ui/dist` 复制到后端 JAR 的 `BOOT-INF/classes/static`。
+源码 ZIP 同时包含 `compare-service`、`compare-spark`、`compare-ui` 源码和在外网已构建的 `compare-ui/dist`。内网使用下文的跳过参数时，无需安装 Node/npm 或重新编译前端；Maven 会把 ZIP 中的 `dist` 复制到后端 JAR 的 `BOOT-INF/classes/static`。如需修改前端源码，仍须重新执行完整前端构建再打包源码 ZIP。
 
-源码包不包含 `.git`、`node_modules`、`target`、前端 `dist`、本地数据库配置、密码或依赖缓存。`SOURCE-COMMIT.txt` 记录打包提交，ZIP 旁的 `.sha256` 文件用于传输校验。
+源码包不包含 `.git`、`node_modules`、`target`、本地数据库配置、密码或依赖缓存。`SOURCE-COMMIT.txt` 记录打包提交，ZIP 旁的 `.sha256` 文件用于传输校验。
 
 ## 内网构建前置条件
 
@@ -13,8 +13,7 @@
 | JDK | 17；不要使用本机默认 JDK 25 构建当前 Lombok 版本 |
 | Maven | 3.9 或更高版本 |
 | Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、前端 Maven 插件、JDBC 驱动及全部传递依赖；尤其要预置 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`，该版本不在 Maven Central |
-| Node 分发源 | 必须能提供 Node `22.14.0`；默认插件会访问 `nodejs.org` |
-| npm 仓库 | 必须提供 `package-lock.json` 锁定的 npm 包和 npm `10.9.2`；可使用企业 npm Registry |
+| Node/npm | 使用预编译前端的构建命令时不需要；只有在内网修改并重编前端时，才需 Node `22.14.0`、npm `10.9.2` 和锁定的 npm 包 |
 | 构建资源 | 建议至少 4 CPU、8 GiB 内存和 5 GiB 可用磁盘 |
 
 源码 ZIP 不包含 Maven/npm/Node 依赖，因此只有在上述内网镜像齐全时才属于可构建包。完全隔离且没有依赖镜像的环境不能只靠该源码 ZIP 完成构建，需要另行制作依赖缓存包或在可信联网环境生成发布包。
@@ -27,7 +26,7 @@
 npm config set registry https://your-internal-npm/repository/npm-group/
 ```
 
-Node 下载地址由 `frontend-maven-plugin` 使用。若内网不能访问默认地址，需要在企业制品库镜像 Node 官方目录，并在构建时提供插件对应的 `nodeDownloadRoot` 配置；也可以由内网管理员将 Node 22.14.0 预热到构建节点使用的插件缓存。
+如需在内网重新编译前端，Node 下载地址由 `frontend-maven-plugin` 使用。内网不能访问默认地址时，需要在企业制品库镜像 Node 官方目录，并提供插件对应的 `nodeDownloadRoot` 配置；也可以预热 Node 22.14.0 到构建节点的插件缓存。
 
 ## 构建与验收
 
@@ -35,8 +34,8 @@ Node 下载地址由 `frontend-maven-plugin` 使用。若内网不能访问默�
 unzip tss-compare-source-1.0.0-SNAPSHOT.zip
 cd tss-compare-source-1.0.0-SNAPSHOT
 export JAVA_HOME=/path/to/jdk17
-mvn clean verify
-bin/package.sh
+mvn -Dskip.installnodenpm=true -Dskip.npm=true clean verify
+bin/package.sh -Dskip.installnodenpm=true -Dskip.npm=true
 ```
 
 构建成功后检查：
@@ -48,6 +47,6 @@ jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
 tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz
 ```
 
-第一条命令必须找到管理台首页，证明前端已进入后端 JAR。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。
+第一条命令必须找到管理台首页，证明预编译前端已进入后端 JAR。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数只跳过 Node/npm，不跳过后端和 Spark 的测试。
 
 真实 GaussDB、Spark Master、厂商驱动和生产配置不属于源码构建条件，必须在部署验收阶段单独提供和验证。
