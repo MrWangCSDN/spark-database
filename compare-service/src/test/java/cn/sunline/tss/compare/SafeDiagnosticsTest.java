@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.*;
 class SafeDiagnosticsTest {
     @Test void preservesCauseTypesAndSafeContextWhileRedactingCredentials() {
         var cause = new SQLException("column CONFIGURATION_MODULE missing; password=db-secret; jdbc:postgresql://db.internal:5432/app?user=ccbs&password=query-secret");
-        var error = new IllegalStateException("JASYPT_ENCRYPTOR_PASSWORD=ccbs", cause);
+        var error = new IllegalStateException("JASYPT_ENCRYPTOR_PASSWORD=fixture-only-key", cause);
 
         String summary = SafeDiagnostics.summary(error);
 
