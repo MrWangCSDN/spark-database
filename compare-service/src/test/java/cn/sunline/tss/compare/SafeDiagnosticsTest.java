@@ -32,4 +32,12 @@ class SafeDiagnosticsTest {
         assertThat(SafeDiagnostics.summary(error)).hasSizeLessThanOrEqualTo(500);
         assertThat(SafeDiagnostics.logDetail(error)).hasSizeLessThanOrEqualTo(4000);
     }
+
+    @Test void sanitizesAndBoundsCompletionMessages() {
+        String message = SafeDiagnostics.message("Spark failed password=hidden-value; " + "x".repeat(6000));
+
+        assertThat(message).contains("Spark failed", "password=[REDACTED]")
+            .doesNotContain("hidden-value")
+            .hasSizeLessThanOrEqualTo(500);
+    }
 }

@@ -52,6 +52,11 @@ final class SafeDiagnostics {
         return bound(value.toString(), LOG_LIMIT);
     }
 
+    static String message(String raw) {
+        String value = sanitize(raw);
+        return bound(value.isBlank() ? "UnknownFailure" : value, SUMMARY_LIMIT);
+    }
+
     private static String sanitize(String raw) {
         if (raw == null || raw.isBlank()) return "";
         String value = JDBC.matcher(raw).replaceAll("jdbc:[REDACTED]");

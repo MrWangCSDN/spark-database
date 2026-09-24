@@ -57,7 +57,7 @@ public class TaskWorker implements SmartLifecycle {
             launcher.submit(arguments.build(task,name,old,dest,sql.oldSql(),sql.newSql()));
             var completion=repository.completion(task);
             if(!completion.complete()) {
-                String reason=completion.failureReason();
+                String reason=SafeDiagnostics.message(completion.failureReason());
                 log.error("Spark作业结束但结果不完整，task={}，diagnostic={}",task,reason);
                 repository.failIncompleteResult(task,reason);
             }
