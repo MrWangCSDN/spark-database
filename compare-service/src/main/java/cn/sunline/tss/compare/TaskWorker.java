@@ -55,13 +55,18 @@ public class TaskWorker implements SmartLifecycle {
             if(old==null || dest==null) throw new IllegalStateException("数据库配置缺失，请刷新");
             log.info("提交库表任务 index={}, date={}, batch={}",task.index(),task.date(),task.batch());
             launcher.submit(arguments.build(task,name,old,dest,sql.oldSql(),sql.newSql()));
-            if (!repository.hasCompletedResult(task)) repository.failIncompleteResult(task);
+            var completion=repository.completion(task);
+            if(!completion.complete()) {
+                String reason=completion.failureReason();
+                log.error("Spark作业结束但结果不完整，task={}，diagnostic={}",task,reason);
+                repository.failIncompleteResult(task,reason);
+            }
         } catch(Exception e) {
-            // JDBC/Launcher异常可能含URL及作业参数，不把原异常消息写进日志或任务表。
-            log.error("库表任务失败，task={}，异常类型={}",task,e.getClass().getSimpleName());
+            String summary=SafeDiagnostics.summary(e);
+            log.error("库表任务失败，task={}，diagnostic={}",task,SafeDiagnostics.logDetail(e));
             if(task!=null) {
-                try { repository.fail(task,"库表比对执行失败："+e.getClass().getSimpleName()+"，请检查Spark日志"); }
-                catch(RuntimeException writeError) { log.error("任务失败状态回写失败，task={}，异常类型={}",task,writeError.getClass().getSimpleName()); }
+                try { repository.fail(task,summary); }
+                catch(RuntimeException writeError) { log.error("任务失败状态回写失败，task={}，diagnostic={}",task,SafeDiagnostics.logDetail(writeError)); }
             }
             if(e instanceof InterruptedException) Thread.currentThread().interrupt();
         } finally { gate.readLock().unlock(); }

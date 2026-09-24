@@ -1,6 +1,10 @@
 package cn.sunline.tss.compare;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.*;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -36,14 +40,27 @@ class TaskWorkerTest {
     }
     @AfterEach void cleanup() { if(worker != null) worker.stop(); }
     @Test void failedSubmissionIsRecordedWithoutKillingWorker() {
-        addTask("1"); start(args -> { throw new IllegalStateException("sensitive detail"); }); worker.runOne();
-        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
-        assertThat(jdbc.queryForObject("select FTASK_REASON from TSS_BCOMP_TASK_NEW", String.class)).doesNotContain("sensitive detail");
-        assertThat(worker.status()).isEqualTo("2");
+        var logger=(Logger)LoggerFactory.getLogger(TaskWorker.class);var events=new ListAppender<ILoggingEvent>();events.start();logger.addAppender(events);
+        try {
+            addTask("1"); start(args -> { throw new IllegalStateException("stage=submit password=sensitive-detail"); }); worker.runOne();
+            String reason=jdbc.queryForObject("select FTASK_REASON from TSS_BCOMP_TASK_NEW",String.class);
+            String logged=events.list.stream().map(ILoggingEvent::getFormattedMessage).reduce("",(a,b)->a+"\n"+b);
+            assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
+            assertThat(reason).contains("IllegalStateException","stage=submit").doesNotContain("sensitive-detail");
+            assertThat(logged).contains("IllegalStateException","TaskWorkerTest").doesNotContain("sensitive-detail");
+            assertThat(worker.status()).isEqualTo("2");
+        } finally { logger.detachAppender(events); }
     }
     @Test void finishedProcessWithoutPersistedResultMustNotBecomeSuccess() {
-        addTask("1"); start(args -> {}); worker.runOne();
-        assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
+        var logger=(Logger)LoggerFactory.getLogger(TaskWorker.class);var events=new ListAppender<ILoggingEvent>();events.start();logger.addAppender(events);
+        try {
+            addTask("1"); start(args -> {}); worker.runOne();
+            assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("4");
+            assertThat(jdbc.queryForObject("select FTASK_REASON from TSS_BCOMP_TASK_NEW",String.class))
+                .contains("TASK_STATE=2","FILE1_ACOUNT=缺失","FILE2_ACOUNT=缺失");
+            assertThat(events.list.stream().map(ILoggingEvent::getFormattedMessage))
+                .anySatisfy(message -> assertThat(message).contains("Spark作业结束但结果不完整","TASK_STATE=2"));
+        } finally { logger.detachAppender(events); }
     }
     @Test void successfulJobKeepsLegacyDifferenceResult() {
         addTask("1"); start(args -> jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='3',TASK_RESULT='1',FILE1_ACOUNT=3,FILE2_ACOUNT=3"));

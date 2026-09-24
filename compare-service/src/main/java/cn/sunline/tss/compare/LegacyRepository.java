@@ -47,15 +47,18 @@ public class LegacyRepository {
         jdbc.update("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='4',TASK_RESULT='1',FTASK_REASON=?,END_DATETIME=? WHERE " + IDENTITY + " AND TASK_STATE='2'",
             reason, now(), task.index(), task.date(), task.batch());
     }
-    public boolean hasCompletedResult(Task task) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT TASK_STATE,FILE1_ACOUNT,FILE2_ACOUNT FROM TSS_BCOMP_TASK_NEW WHERE " + IDENTITY,
-            (rs,n) -> "3".equals(rs.getString(1)) && rs.getObject(2) != null && rs.getObject(3) != null,
-            task.index(), task.date(), task.batch()));
+    public CompletionStatus completion(Task task) {
+        List<CompletionStatus> rows=jdbc.query("SELECT TASK_STATE,TASK_RESULT,FILE1_ACOUNT,FILE2_ACOUNT,BCOMP_READ_MODE,FTASK_REASON FROM TSS_BCOMP_TASK_NEW WHERE " + IDENTITY,
+            (rs,n) -> new CompletionStatus(1,rs.getString(1),rs.getString(2),nullableLong(rs,3),nullableLong(rs,4),rs.getString(5),rs.getString(6)),
+            task.index(), task.date(), task.batch());
+        if(rows.isEmpty()) return new CompletionStatus(0,null,null,null,null,null,null);
+        if(rows.size()>1) return new CompletionStatus(rows.size(),null,null,null,null,null,null);
+        return rows.get(0);
     }
-    public void failIncompleteResult(Task task) {
+    public void failIncompleteResult(Task task,String reason) {
         jdbc.update("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='4',TASK_RESULT='1',FTASK_REASON=?,END_DATETIME=? WHERE " + IDENTITY
                 + " AND (TASK_STATE='2' OR (TASK_STATE='3' AND (FILE1_ACOUNT IS NULL OR FILE2_ACOUNT IS NULL)))",
-            "Spark结束但未写入完整结果，请检查Spark日志", now(), task.index(), task.date(), task.batch());
+            reason, now(), task.index(), task.date(), task.batch());
     }
     public SqlConfig sql(Task task) {
         Integer fields = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=?", Integer.class, task.index());
@@ -76,6 +79,27 @@ public class LegacyRepository {
     private static Task task(ResultSet rs) throws SQLException {
         return new Task(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5));
     }
+    private static Long nullableLong(ResultSet rs,int column) throws SQLException {
+        long value=rs.getLong(column);return rs.wasNull()?null:value;
+    }
     private static String now() { return LocalDateTime.now().format(TIME); }
+    public record CompletionStatus(int rowCount,String taskState,String taskResult,Long file1Count,Long file2Count,
+                                   String readMode,String existingReason) {
+        public boolean complete() {
+            return rowCount==1&&"3".equals(taskState)&&file1Count!=null&&file2Count!=null;
+        }
+        public String failureReason() {
+            if(complete()) return null;
+            if(rowCount==0) return "Spark结束后找不到对应任务记录";
+            if(rowCount>1) return "Spark结束后任务身份不唯一：记录数="+rowCount;
+            if(existingReason!=null&&!existingReason.isBlank()) return existingReason;
+            return "Spark结束但任务结果不完整：TASK_STATE="+display(taskState)
+                +", TASK_RESULT="+display(taskResult)
+                +", FILE1_ACOUNT="+display(file1Count)
+                +", FILE2_ACOUNT="+display(file2Count)
+                +", BCOMP_READ_MODE="+display(readMode);
+        }
+        private static String display(Object value) { return value==null?"缺失":String.valueOf(value); }
+    }
     public record SqlConfig(long oldId, long newId, String oldSql, String newSql) {}
 }

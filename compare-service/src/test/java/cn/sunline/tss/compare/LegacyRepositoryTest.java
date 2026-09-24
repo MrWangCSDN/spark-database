@@ -60,4 +60,30 @@ class LegacyRepositoryTest {
         assertThat(jdbc.queryForObject("select TASK_RESULT from TSS_BCOMP_TASK_NEW where BCOMP_INDEX=2", String.class)).isEqualTo("1");
         assertThat(jdbc.queryForObject("select TASK_STATE from TSS_BCOMP_TASK_NEW where BCOMP_INDEX=1", String.class)).isEqualTo("1");
     }
+    @Test void completionAcceptsStateThreeWithZeroCounts() {
+        task(2,"A");var claimed=repository.claim();
+        jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='3',TASK_RESULT='2',FILE1_ACOUNT=0,FILE2_ACOUNT=0 where BCOMP_INDEX=2");
+        var completion=repository.completion(claimed);
+        assertThat(completion.complete()).isTrue();
+        assertThat(completion.failureReason()).isNull();
+    }
+    @Test void completionExplainsMissingTaskRow() {
+        var completion=repository.completion(new Task(99,"20260920","missing","A",null));
+        assertThat(completion.complete()).isFalse();
+        assertThat(completion.failureReason()).isEqualTo("Spark结束后找不到对应任务记录");
+    }
+    @Test void completionExplainsStateAndMissingCounts() {
+        task(2,"A");var claimed=repository.claim();
+        jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='3',TASK_RESULT='2',FILE1_ACOUNT=8 where BCOMP_INDEX=2");
+        var completion=repository.completion(claimed);
+        assertThat(completion.complete()).isFalse();
+        assertThat(completion.failureReason()).contains("TASK_STATE=3","FILE1_ACOUNT=8","FILE2_ACOUNT=缺失");
+    }
+    @Test void completionPreservesFailureReasonWrittenBySpark() {
+        task(2,"A");var claimed=repository.claim();
+        jdbc.update("update TSS_BCOMP_TASK_NEW set TASK_STATE='4',TASK_RESULT='3',FTASK_REASON='Spark结果写库失败' where BCOMP_INDEX=2");
+        var completion=repository.completion(claimed);
+        assertThat(completion.complete()).isFalse();
+        assertThat(completion.failureReason()).isEqualTo("Spark结果写库失败");
+    }
 }
