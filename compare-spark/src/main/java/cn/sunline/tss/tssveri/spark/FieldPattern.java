@@ -22,4 +22,8 @@ final class FieldPattern implements Serializable {
             throw new IllegalStateException("差异字段组合无法编码", e);
         }
     }
+    FieldPattern(String json,String id) {
+        if(json==null||id==null) throw new IllegalArgumentException("差异字段组合标识不能为空");
+        this.json=json;this.id=id;
+    }
 }

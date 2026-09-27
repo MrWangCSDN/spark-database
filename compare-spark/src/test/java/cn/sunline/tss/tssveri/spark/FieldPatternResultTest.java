@@ -32,11 +32,24 @@ class FieldPatternResultTest {
             assertEquals(counts[i],stats.count);assertEquals(100,stats.sampleCount());
         }
     }
-    @Test void zeroLimitStillCountsAllPatternsAndRejectsOverflow() {
-        var aggregate=new ResultAggregate(0);
-        aggregate.difference("4","key",List.of("a","b"),()->{throw new AssertionError("No sample expected");});
-        assertEquals(1,aggregate.patternCount());assertEquals(0,aggregate.patternSampleCount());
-        for(int i=1;i<ResultAggregate.MAX_PATTERNS;i++) aggregate.difference("4","key"+i,List.of("f"+i),()->{throw new AssertionError("No sample expected");});
-        assertThrows(IllegalArgumentException.class,()->aggregate.difference("4","overflow",List.of("overflow"),()->null));
+    @Test void zeroLimitRetainsTop127AndAccountsForCollapsedPatternWithoutSamples() {
+        var counts=new PatternCounts();
+        var combinations=new ArrayList<List<String>>();
+        for(int i=0;i<128;i++) {var fields=List.of("f"+i);combinations.add(fields);counts.add(fields);}
+        var selection=counts.select(127,0);
+        var aggregate=new ResultAggregate(0,selection.retainedIds(),selection.patternSampleLimit());
+        for(int i=0;i<combinations.size();i++) {
+            int index=i;
+            aggregate.difference("4","key"+i,combinations.get(i),()->{throw new AssertionError("No sample expected for "+index);});
+        }
+        aggregate.collapse(selection.collapsedPatternCount(),selection.collapsedDifferentCount());
+        assertEquals(128,aggregate.different);
+        assertEquals(128,aggregate.patternCount());
+        assertEquals(128,aggregate.patterns().size());
+        assertEquals(0,aggregate.patternSampleCount());
+        var other=aggregate.patterns().get(127);
+        assertEquals("__OTHER__",other.id);
+        assertEquals(1,other.collapsedPatternCount);
+        assertEquals(1,other.count);
     }
 }
