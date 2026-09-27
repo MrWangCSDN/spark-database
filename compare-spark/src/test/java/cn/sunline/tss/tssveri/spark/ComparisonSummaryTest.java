@@ -30,4 +30,19 @@ class ComparisonSummaryTest {
         var groups=List.of(group("key",List.of(new String[]{"a"},new String[]{"b"}),Collections.singletonList(new String[]{"c"})));
         assertThrows(IllegalArgumentException.class,()->SparkHandlerTable.comparePartition(groups.iterator(),List.of(field("name","1",null)),Map.of(),new HashMap<>(),1000));
     }
+    @Test void countAndSamplePassesShareExactlyTheSameFieldComparison() {
+        var fields=List.of(field("amount","2",null),field("name","1",null),field("ignored","1","7"));
+        var groups=List.of(
+            group("both",Collections.singletonList(new String[]{"1.00","old","IGNORE"}),Collections.singletonList(new String[]{"2","new","different"})),
+            group("name",Collections.singletonList(new String[]{"1.00","before","IGNORE"}),Collections.singletonList(new String[]{"1","after","different"}))
+        );
+        var ignored=Map.of(7,Set.of("IGNORE"));
+        var counts=SparkHandlerTable.countPatternsPartition(groups.iterator(),fields,ignored,new HashMap<>());
+        var selection=counts.select(127,1000);
+        var result=SparkHandlerTable.comparePartition(groups.iterator(),fields,ignored,new HashMap<>(),1000,selection.retainedIds(),selection.patternSampleLimit());
+        var sampled=new TreeMap<String,Long>();
+        result.patterns().forEach(pattern->sampled.put(pattern.id,pattern.count));
+        assertEquals(counts.snapshot(),sampled);
+        assertEquals(2,result.different);
+    }
 }

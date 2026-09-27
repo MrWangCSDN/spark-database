@@ -9,6 +9,7 @@ import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.*;
 import scala.Tuple2;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.text.SimpleDateFormat;
@@ -170,14 +171,18 @@ public class SparkHandlerTable {
             //采用cogroup进行join
             JavaPairRDD<String, Tuple2<Iterable<String[]>, Iterable<String[]>>> rsCogroup = pairsOra.cogroup(pairsYjj);
 
-
-            ResultAggregate result=rsCogroup.mapPartitions(tuple -> {
-                Class.forName(args[tssDataSourceDriver]);
-                try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-                    return Collections.singletonList(comparePartition(tuple,bcField.value(),
-                        loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv),limit)).iterator();
-                }
-            }).treeReduce(ResultAggregate::merge,3);
+            ResultAggregate result=runTwoPass(rsCogroup,limit,tuple -> {
+                    Class.forName(args[tssDataSourceDriver]);
+                    try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                        return countPatternsPartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv));
+                    }
+                },(tuple,selection) -> {
+                    Class.forName(args[tssDataSourceDriver]);
+                    try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                        return comparePartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv),
+                            limit,selection.retainedIds(),selection.patternSampleLimit());
+                    }
+                });
             DailyResultPublisher.publish(connectionOut,args,resultContext,result);
         } catch(Exception error) {
             try(Connection c=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
@@ -191,18 +196,68 @@ public class SparkHandlerTable {
 
     static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,
             List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap,int limit) {
-        ResultAggregate result=new ResultAggregate(limit);
+        return comparePartition(groups,fields,ignoreData,enumMap,limit,null,limit);
+    }
+
+    static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,
+            List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap,int limit,
+            Set<String> retainedPatternIds,int patternSampleLimit) {
+        ResultAggregate result=new ResultAggregate(limit,retainedPatternIds,patternSampleLimit);
         List<String> names=fields.stream().map(row -> (String)row.getAs("FIELD_NAME")).collect(Collectors.toList());
         List<String> labels=fields.stream().map(row -> (String)row.getAs("FIELD_MEMO")).collect(Collectors.toList());
         while(groups.hasNext()) {
-            var group=groups.next();String key=group._1();
-            String[] a=uniqueRecord(group._2()._1()),b=uniqueRecord(group._2()._2());
-            ArrayList<String> different=new ArrayList<>();
-            String type=a==null?"2":b==null?"3":compareRows(fields,ignoreData,enumMap,a,b,different)?"4":null;
-            if(type==null) result.matched=Math.addExact(result.matched,1);
-            else result.difference(type,key,different,()->SampleRow.of(key,type,names,labels,a,b,different));
+            var compared=compareGroup(groups.next(),fields,ignoreData,enumMap);
+            if(compared.type==null) result.matched=Math.addExact(result.matched,1);
+            else result.difference(compared.type,compared.key,compared.differingFields,
+                ()->SampleRow.of(compared.key,compared.type,names,labels,compared.origin,compared.destination,compared.differingFields));
         }
         return result;
+    }
+
+    static PatternCounts countPatternsPartition(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,
+            List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap) {
+        var result=new PatternCounts();
+        while(groups.hasNext()) {
+            var compared=compareGroup(groups.next(),fields,ignoreData,enumMap);
+            if("4".equals(compared.type)) result.add(compared.differingFields);
+        }
+        return result;
+    }
+
+    private static ComparedGroup compareGroup(Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>> group,
+            List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap) {
+        String[] origin=uniqueRecord(group._2()._1()),destination=uniqueRecord(group._2()._2());
+        ArrayList<String> differingFields=new ArrayList<>();
+        String type=origin==null?"2":destination==null?"3":compareRows(fields,ignoreData,enumMap,origin,destination,differingFields)?"4":null;
+        return new ComparedGroup(group._1(),type,differingFields,origin,destination);
+    }
+
+    private record ComparedGroup(String key,String type,List<String> differingFields,String[] origin,String[] destination) implements Serializable {}
+
+    @FunctionalInterface
+    interface CountPartition extends Serializable {
+        PatternCounts apply(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups) throws Exception;
+    }
+
+    @FunctionalInterface
+    interface SamplePartition extends Serializable {
+        ResultAggregate apply(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,PatternCounts.Selection selection) throws Exception;
+    }
+
+    static ResultAggregate runTwoPass(JavaPairRDD<String,Tuple2<Iterable<String[]>,Iterable<String[]>>> groups,int detailLimit,
+            CountPartition countPartition,SamplePartition samplePartition) {
+        groups.persist(org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK_SER());
+        try {
+            PatternCounts counts=groups.mapPartitions(values->Collections.singletonList(countPartition.apply(values)).iterator())
+                .treeReduce(PatternCounts::merge,3);
+            PatternCounts.Selection selection=counts.select(127,detailLimit);
+            ResultAggregate result=groups.mapPartitions(values->Collections.singletonList(samplePartition.apply(values,selection)).iterator())
+                .treeReduce(ResultAggregate::merge,3);
+            result.collapse(selection.collapsedPatternCount(),selection.collapsedDifferentCount());
+            return result;
+        } finally {
+            groups.unpersist(false);
+        }
     }
 
     private static String[] uniqueRecord(Iterable<String[]> values) {
