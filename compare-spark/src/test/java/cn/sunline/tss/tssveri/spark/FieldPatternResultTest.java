@@ -52,4 +52,25 @@ class FieldPatternResultTest {
         assertEquals(1,other.collapsedPatternCount);
         assertEquals(1,other.count);
     }
+    @Test void mergingPartitionsKeepsEachRetainedPatternWithinTheGlobalSampleBudget() {
+        var counts=new PatternCounts();
+        var combinations=new ArrayList<List<String>>();
+        for(int i=0;i<127;i++) {var fields=List.of("f"+i);combinations.add(fields);counts.add(fields);}
+        var selection=counts.select(127,1000);
+        assertEquals(157,selection.patternSampleLimit());
+        var combined=new ResultAggregate(1000,selection.retainedIds(),selection.patternSampleLimit());
+        for(int partition=0;partition<2;partition++) {
+            var part=new ResultAggregate(1000,selection.retainedIds(),selection.patternSampleLimit());
+            for(int pattern=0;pattern<combinations.size();pattern++) for(int n=0;n<158;n++) {
+                String key=partition+"-"+pattern+"-"+n;
+                List<String> fields=combinations.get(pattern);
+                part.difference("4",key,fields,()->SampleRow.of(key,"4",fields,new String[]{"0"},new String[]{"1"},fields));
+            }
+            assertDoesNotThrow(()->combined.merge(part));
+        }
+        assertEquals(40132,combined.different);
+        assertEquals(combined.different,combined.patternCount());
+        assertEquals(127*157,combined.patternSampleCount());
+        assertTrue(combined.patterns().stream().allMatch(pattern->pattern.sampleCount()==157));
+    }
 }

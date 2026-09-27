@@ -74,7 +74,7 @@ public class ResultAggregate implements Serializable {
             } else if(!current.json.equals(incoming.json)) throw new IllegalStateException("差异字段组合标识冲突");
             current.count=Math.addExact(current.count,incoming.count);
             TreeMap<String,SampleRow> samples=current.samples;
-            incoming.samples.forEach((key,value)->{ if(eligible(samples,key,limit)) put(samples,key,limit,value); });
+            incoming.samples.forEach((key,value)->{ if(eligible(samples,key,patternSampleLimit)) put(samples,key,patternSampleLimit,value); });
         });
         if(patternSampleCount()>MAX_PATTERN_SAMPLES) throw new IllegalArgumentException("字段组合样本超过"+MAX_PATTERN_SAMPLES+"条，请降低样本上限");
         return this;
