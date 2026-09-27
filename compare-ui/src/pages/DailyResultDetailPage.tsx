@@ -15,7 +15,9 @@ export function DailyResultDetailPage() {
   const [patternId, setPatternId] = useState<string | null>(null)
   const result = useQuery({ queryKey: ['daily-result', identity], queryFn: () => api<DailyResult>(`/api/results/${identity}`), refetchInterval: 15000 })
   const patterns = useQuery({ queryKey: ['daily-field-patterns', identity, result.data?.runId], queryFn: () => api<FieldPattern[]>(query(`/api/results/${identity}/field-patterns`, { version: result.data?.runId })), enabled: !!result.data && type === '4', refetchInterval: 15000 })
-  const selectedPattern = type === '4' ? patterns.data?.find(pattern => pattern.patternId === (patternId ?? patterns.data?.[0]?.patternId)) : undefined
+  const selectablePatterns = patterns.data?.filter(pattern => pattern.patternId !== '__OTHER__') ?? []
+  const collapsedPattern = patterns.data?.find(pattern => pattern.patternId === '__OTHER__')
+  const selectedPattern = type === '4' ? selectablePatterns.find(pattern => pattern.patternId === (patternId ?? selectablePatterns[0]?.patternId)) : undefined
   const legacyFields = type === '4' && patterns.isSuccess && patterns.data.length === 0 && !!result.data?.differentCount
   const showSamples = type !== '4' || legacyFields || !!selectedPattern
   const samples = useQuery({ queryKey: ['daily-samples', identity, result.data?.runId, type, selectedPattern?.patternId, page], queryFn: () => api<DailySamples>(query(`/api/results/${identity}/differences`, { type, patternId: selectedPattern?.patternId, version: result.data?.runId, page, size: 100 })), enabled: !!result.data && showSamples, refetchInterval: 15000 })
@@ -36,7 +38,10 @@ export function DailyResultDetailPage() {
       {type === '4' && patterns.isLoading && <ContentState state="loading" title="正在读取字段组合" />}
       {type === '4' && patterns.isError && <ContentState state="error" title="字段组合读取失败" description={patterns.error.message} action={<button className="button ghost" onClick={() => { void result.refetch(); void patterns.refetch() }}>刷新结果</button>} />}
       {type === '4' && legacyFields && <div className="notice" role="status">此结果没有字段组合汇总，请重新执行核对以查看各组合的精确数量。下方仍可查看旧版差异样本。</div>}
-      {type === '4' && !!patterns.data?.length && <div className="daily-pattern-picker" role="group" aria-label="差异字段组合">{patterns.data.map(pattern => <button key={pattern.patternId} type="button" className="pattern-switch" aria-pressed={selectedPattern?.patternId === pattern.patternId} onClick={() => { setPatternId(pattern.patternId); setPage(0) }}><strong>[{pattern.fields.join('、')}]</strong><span>{pattern.differentCount.toLocaleString()} 行</span><small>已存样本 <span>{pattern.sampleCount.toLocaleString()} 条</span></small></button>)}</div>}
+      {type === '4' && !!patterns.data?.length && <div className="daily-pattern-picker" role="group" aria-label="差异字段组合">
+        {selectablePatterns.map(pattern => <button key={pattern.patternId} type="button" className="pattern-switch" aria-pressed={selectedPattern?.patternId === pattern.patternId} onClick={() => { setPatternId(pattern.patternId); setPage(0) }}><strong>[{pattern.fields.join('、')}]</strong><span>{pattern.differentCount.toLocaleString()} 行</span><small>已存样本 <span>{pattern.sampleCount.toLocaleString()} 条</span></small></button>)}
+        {collapsedPattern && <div className="pattern-switch collapsed-pattern-summary" role="note">其余 {collapsedPattern.collapsedPatternCount.toLocaleString()} 种组合，共 {collapsedPattern.differentCount.toLocaleString()} 条差异，未保存样本</div>}
+      </div>}
       {showSamples && samples.isLoading && <ContentState state="loading" title="正在读取样本" />}
       {showSamples && samples.isError && <ContentState state="error" title="样本读取失败" description={samples.error.message} action={<button className="button ghost" onClick={() => { void result.refetch(); void samples.refetch() }}>刷新结果</button>} />}
       {showSamples && samples.data && !samples.data.items.length && <ContentState state="empty" title="没有已保存的样本" description={total > 0 ? '请以全量差异数量为准；样本可能未启用或已清理。' : '该类别没有差异。'} />}

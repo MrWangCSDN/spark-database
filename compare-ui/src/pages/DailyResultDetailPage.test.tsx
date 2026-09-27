@@ -7,9 +7,9 @@ import { DailyResultDetailPage } from './DailyResultDetailPage'
 import { DailyResultsPage } from './DailyResultsPage'
 
 export const daily = { bcompIndex: 1, resultDate: '20260920', runId: 'v1', taskBusiDate: '20260921', taskBatch: 'b1', timeNode: 'D', configurationName: '客户表', configurationModule: 'dept', originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat', originCount: 1000005, destinationCount: 2000005, matchedCount: 3, onlyOriginCount: 1000000, onlyDestinationCount: 2000000, differentCount: 2, detailLimit: 1000, originSamples: 1000, destinationSamples: 1000, differentSamples: 2, publishedAt: '20260922120000', detailsExpired: '0' }
-function mock(expired = false, patterns: Array<{ patternId: string; fields: string[]; differentCount: number; sampleCount: number }> = [
-  { patternId: 'balance', fields: ['balance'], differentCount: 1, sampleCount: 1 },
-  { patternId: 'balance-status', fields: ['balance', 'status'], differentCount: 1, sampleCount: 1 }
+function mock(expired = false, patterns: Array<{ patternId: string; fields: string[]; differentCount: number; sampleCount: number; collapsedPatternCount: number }> = [
+  { patternId: 'balance', fields: ['balance'], differentCount: 1, sampleCount: 1, collapsedPatternCount: 1 },
+  { patternId: 'balance-status', fields: ['balance', 'status'], differentCount: 1, sampleCount: 1, collapsedPatternCount: 1 }
 ]) {
   const summary = expired ? { ...daily, detailsExpired: '1', originSamples: 0 } : daily
   server.use(
@@ -68,8 +68,8 @@ test('falls back to legacy samples when an old result has no field groups', asyn
 })
 test('paginates samples within the chosen group and resets on another group', async () => {
   mock(false, [
-    { patternId: 'balance', fields: ['balance'], differentCount: 100, sampleCount: 25 },
-    { patternId: 'status', fields: ['status'], differentCount: 40, sampleCount: 2 }
+    { patternId: 'balance', fields: ['balance'], differentCount: 100, sampleCount: 25, collapsedPatternCount: 1 },
+    { patternId: 'status', fields: ['status'], differentCount: 40, sampleCount: 2, collapsedPatternCount: 1 }
   ])
   const requests: string[] = []
   server.use(http.get('/api/results/1/20260920/differences', ({ request }) => {
@@ -111,4 +111,35 @@ test('reports a publication replaced during sample loading', async () => {
   renderPage(<DailyResultDetailPage />, '/results/1/20260920')
   expect(await screen.findByText('当天结果已更新，请刷新后查看')).toBeVisible()
   expect(screen.getByRole('button', { name: '刷新结果' })).toBeVisible()
+})
+test('shows collapsed patterns last without requesting their samples', async () => {
+  const requested: Array<string | null> = []
+  mock(false, [
+    { patternId: 'balance', fields: ['balance'], differentCount: 90, sampleCount: 3, collapsedPatternCount: 1 },
+    { patternId: '__OTHER__', fields: [], differentCount: 40, sampleCount: 0, collapsedPatternCount: 12 }
+  ])
+  server.use(http.get('/api/results/1/20260920/differences', ({ request }) => {
+    requested.push(new URL(request.url).searchParams.get('patternId'))
+    return HttpResponse.json({ summary: daily, items: [], page: 0, size: 100, total: 3 })
+  }))
+  const user = userEvent.setup()
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  await user.click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
+  expect(await screen.findByText('其余 12 种组合，共 40 条差异，未保存样本')).toBeVisible()
+  expect(screen.queryByRole('button', { name: /其余 12 种组合/ })).not.toBeInTheDocument()
+  expect(requested).not.toContain('__OTHER__')
+})
+test('does not fall back to legacy samples when only collapsed patterns remain', async () => {
+  const requested: Array<string | null> = []
+  mock(false, [{ patternId: '__OTHER__', fields: [], differentCount: 40, sampleCount: 0, collapsedPatternCount: 12 }])
+  server.use(http.get('/api/results/1/20260920/differences', ({ request }) => {
+    requested.push(new URL(request.url).searchParams.get('patternId'))
+    return HttpResponse.json({ summary: daily, items: [], page: 0, size: 100, total: 0 })
+  }))
+  const user = userEvent.setup()
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  await user.click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
+  expect(await screen.findByText('其余 12 种组合，共 40 条差异，未保存样本')).toBeVisible()
+  expect(screen.queryByText(/请重新执行核对/)).not.toBeInTheDocument()
+  expect(requested).toEqual([null])
 })

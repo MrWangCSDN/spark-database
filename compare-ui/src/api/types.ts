@@ -61,5 +61,5 @@ export interface DailySamples {
   page: number; size: number; total: number
 }
 export interface FieldPattern {
-  patternId: string; fields: string[]; differentCount: number; sampleCount: number
+  patternId: string; fields: string[]; differentCount: number; sampleCount: number; collapsedPatternCount: number
 }
