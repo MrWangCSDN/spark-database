@@ -25,6 +25,22 @@ class NewSchemaTest {
         assertThat(jdbc.queryForObject("SELECT TASK_STATE FROM TSS_BCOMP_TASK_NEW", String.class)).isEqualTo("1");
         assertThatThrownBy(() -> jdbc.update("INSERT INTO TSS_BCOMP_TASK_NEW (BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE) VALUES (1,'20260921','1','B')"))
             .isInstanceOf(DataIntegrityViolationException.class);
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT) VALUES(1,'20260927','run',?,'[\"a\"]',3,1)", "a".repeat(64));
+        assertThat(jdbc.queryForObject("SELECT COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW", Integer.class)).isEqualTo(1);
+        assertThatThrownBy(() -> jdbc.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET COLLAPSED_PATTERN_COUNT=0"))
+            .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test void patternOverflowMigrationDefaultsExistingRowsAndRejectsNonPositiveCounts() {
+        var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
+        new ResourceDatabasePopulator(new FileSystemResource("../sql/create_bcomp_new.sql")).execute(ds);
+        var jdbc = new JdbcTemplate(ds);
+        jdbc.update("ALTER TABLE TSS_BCOMP_FIELD_DIFF_NEW DROP COLUMN COLLAPSED_PATTERN_COUNT");
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT) VALUES(1,'20260927','run',?,'[\"a\"]',3,1)", "a".repeat(64));
+        new ResourceDatabasePopulator(new FileSystemResource("../sql/add_bcomp_pattern_overflow_new.sql")).execute(ds);
+        assertThat(jdbc.queryForObject("SELECT COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW", Integer.class)).isEqualTo(1);
+        assertThatThrownBy(() -> jdbc.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET COLLAPSED_PATTERN_COUNT=0"))
+            .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test void incrementalFieldPatternMigrationPreservesDailyResultsAndLegacySamples() throws Exception {
