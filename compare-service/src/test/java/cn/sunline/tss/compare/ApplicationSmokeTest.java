@@ -74,7 +74,7 @@ class ApplicationSmokeTest {
     @Test void servesDailySampleGridThroughRealResultEndpoints() {
         String patternId="a".repeat(64);
         jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW VALUES(17,'20260923','browser-v1','20260923','batch-1','D','客户余额','dept',1,'sit',2,'uat',5,5,4,0,0,1,100,0,0,1,'20260923120000','0')");
-        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW VALUES(17,'20260923','browser-v1',?,'[\"amount\"]',1,1)",patternId);
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT,COLLAPSED_PATTERN_COUNT) VALUES(17,'20260923','browser-v1',?,'[\"amount\"]',1,1,1)",patternId);
         jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,RESULT_DATE,SAMPLE_NO,COMP_INDEX_STR,LINE_RESULT,DETAIL_JSON,PATTERN_ID) VALUES(17,'20260923',1,'C001','4','{\"fields\":[{\"name\":\"amount\",\"label\":\"金额\",\"originValue\":\"120.00\",\"destinationValue\":\"125.00\"}],\"truncated\":false}',?)",patternId);
 
         assertThat(http.getForEntity("/results/17/20260923",String.class).getBody()).contains("<div id=\"root\">");
@@ -84,6 +84,7 @@ class ApplicationSmokeTest {
         JsonNode patterns=http.getForObject("/api/results/17/20260923/field-patterns?version=browser-v1",JsonNode.class);
         assertThat(patterns.get(0).path("patternId").asText()).isEqualTo(patternId);
         assertThat(patterns.get(0).path("sampleCount").asInt()).isEqualTo(1);
+        assertThat(patterns.get(0).path("collapsedPatternCount").asInt()).isEqualTo(1);
         JsonNode samples=http.getForObject("/api/results/17/20260923/differences?type=4&patternId="+patternId+"&version=browser-v1&page=0&size=100",JsonNode.class);
         assertThat(samples.path("total").asInt()).isEqualTo(1);
         assertThat(samples.path("items").get(0).path("detail").path("fields").get(0).path("label").asText()).isEqualTo("金额");

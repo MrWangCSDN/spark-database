@@ -50,10 +50,10 @@ final class DailyResultPublisher {
                 ps.setLong(i++,result.originCount());ps.setLong(i++,result.destinationCount());ps.setLong(i++,result.matched);ps.setLong(i++,result.onlyOrigin);ps.setLong(i++,result.onlyDestination);ps.setLong(i++,result.different);
                 ps.setInt(i++,result.limit);ps.setInt(i++,result.samples("3").size());ps.setInt(i++,result.samples("2").size());ps.setInt(i++,result.patternSampleCount());ps.setString(i,now);ps.executeUpdate();
             }
-            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT) VALUES(?,?,?,?,?,?,?)")) {
+            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT,COLLAPSED_PATTERN_COUNT) VALUES(?,?,?,?,?,?,?,?)")) {
                 for(var pattern:result.patterns()) {
                     ps.setLong(1,index);ps.setString(2,date);ps.setString(3,runId);
-                    ps.setString(4,pattern.id);ps.setString(5,pattern.json);ps.setLong(6,pattern.count);ps.setInt(7,pattern.sampleCount());ps.addBatch();
+                    ps.setString(4,pattern.id);ps.setString(5,pattern.json);ps.setLong(6,pattern.count);ps.setInt(7,pattern.sampleCount());ps.setInt(8,pattern.collapsedPatternCount);ps.addBatch();
                 }
                 ps.executeBatch();
             }
@@ -67,7 +67,7 @@ final class DailyResultPublisher {
                     }
                 }
                 int n=0;
-                for(var pattern:result.patterns()) for(SampleRow row:pattern.sampleRows()) {
+                for(var pattern:result.patterns()) if(!"__OTHER__".equals(pattern.id)) for(SampleRow row:pattern.sampleRows()) {
                     addSample(ps,index,args,date,"4",++n,row,pattern.id);batchCount++;
                     if(batchCount%100==0) {ps.executeBatch();ps.clearBatch();}
                 }

@@ -63,6 +63,29 @@ class DailyResultPublisherTest {
             assertEquals(4,count(c,"SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW"));
         }
     }
+    @Test void publishesTop127AndExactCollapsedSummaryWithoutOtherSamples() throws Exception {
+        try(var c=DriverManager.getConnection("jdbc:h2:mem:"+UUID.randomUUID()+";MODE=PostgreSQL","sa","")) {
+            RunScript.execute(c,Files.newBufferedReader(Path.of("../sql/create_bcomp_new.sql")));
+            String[] args=new String[21];args[6]="1";args[7]="20260927";args[8]="overflow";args[9]="D";args[20]="20260927";
+            var context=new DailyResultPublisher.Context("宽表","loan",1L,"sit",2L,"uat");
+            var counts=new PatternCounts();
+            var combinations=new ArrayList<List<String>>();
+            for(int i=0;i<130;i++) {var fields=List.of("f"+i);combinations.add(fields);counts.add(fields);}
+            var selection=counts.select(127,0);
+            var result=new ResultAggregate(0,selection.retainedIds(),selection.patternSampleLimit());
+            for(int i=0;i<combinations.size();i++) {
+                String key="key"+i;List<String> fields=combinations.get(i);
+                result.difference("4",key,fields,()->{throw new AssertionError("No sample expected");});
+            }
+            result.collapse(selection.collapsedPatternCount(),selection.collapsedDifferentCount());
+            insertTask(c,args);DailyResultPublisher.publish(c,args,context,result);
+            assertEquals(128,count(c,"SELECT COUNT(*) FROM TSS_BCOMP_FIELD_DIFF_NEW"));
+            assertEquals(3,count(c,"SELECT COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE PATTERN_ID='__OTHER__'"));
+            assertEquals(0,count(c,"SELECT SAMPLE_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE PATTERN_ID='__OTHER__'"));
+            assertEquals(0,count(c,"SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW WHERE PATTERN_ID='__OTHER__'"));
+            assertEquals(count(c,"SELECT DIFFERENT_COUNT FROM TSS_BCOMP_RESULT_NEW"),count(c,"SELECT SUM(DIFFERENT_COUNT) FROM TSS_BCOMP_FIELD_DIFF_NEW"));
+        }
+    }
     private static void insertTask(Connection c,String[] a) throws SQLException {
         try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) VALUES(1,?,?,?,'2')")) {ps.setString(1,a[7]);ps.setString(2,a[8]);ps.setString(3,a[9]);ps.executeUpdate();}
     }

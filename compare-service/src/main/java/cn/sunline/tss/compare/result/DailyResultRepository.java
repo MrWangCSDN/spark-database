@@ -38,13 +38,13 @@ public class DailyResultRepository {
         if(rows.isEmpty()) throw ApiException.notFound("RESULT_NOT_FOUND","该核对日期尚无成功发布的结果");
         return rows.get(0);
     }
-    public record FieldPatternResult(String patternId,List<String> fields,long differentCount,int sampleCount) {}
+    public record FieldPatternResult(String patternId,List<String> fields,long differentCount,int sampleCount,int collapsedPatternCount) {}
     public List<FieldPatternResult> fieldPatterns(long index,String date,String version) {
         return transaction.execute(status->{
             var summary=find(index,date,true);
             requireVersion(summary,version);
-            return jdbc.query("SELECT PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND RUN_ID=? ORDER BY DIFFERENT_COUNT DESC,FIELDS_JSON",
-                (rs,n)->new FieldPatternResult(rs.getString(1),parseFields(rs.getString(2)),rs.getLong(3),rs.getInt(4)),index,date,version);
+            return jdbc.query("SELECT PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT,COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND RUN_ID=? ORDER BY CASE WHEN PATTERN_ID='__OTHER__' THEN 1 ELSE 0 END,DIFFERENT_COUNT DESC,PATTERN_ID ASC",
+                (rs,n)->new FieldPatternResult(rs.getString(1),parseFields(rs.getString(2)),rs.getLong(3),rs.getInt(4),rs.getInt(5)),index,date,version);
         });
     }
     private List<String> parseFields(String value) throws java.sql.SQLException {
