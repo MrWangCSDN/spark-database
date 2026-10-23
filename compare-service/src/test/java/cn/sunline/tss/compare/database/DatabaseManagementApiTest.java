@@ -76,6 +76,16 @@ class DatabaseManagementApiTest {
         assertThat(PasswordEncryption.decrypt(row.get("DATABASE_PASSWORD").toString(), row.get("DATABASE_GENERATERKEY").toString())).isEqualTo("plain-password");
     }
 
+    @Test void acceptsGdbMysqlCompatibleConnectionWithoutCurrentSchema() throws Exception {
+        mvc.perform(post("/api/databases").contentType(APPLICATION_JSON).content("""
+            {"databaseId":8,"databaseName":"GDB","url":"jdbc:mysql://gdb/core","user":"compare","driver":"com.mysql.jdbc.Driver","encryption":"1","newPassword":"gdb-password"}
+            """))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.databaseName").value("GDB"));
+        assertThat(jdbc.queryForObject("select DATABASE_URL from TSS_BCOMP_DATABASE_CONFIG_NEW where DATABASE_ID=8", String.class))
+            .isEqualTo("jdbc:mysql://gdb/core");
+    }
+
     @Test void rejectsCreatingCompatibleConnectionWithoutCurrentSchema() throws Exception {
         mvc.perform(post("/api/databases").contentType(APPLICATION_JSON).content("""
             {"databaseId":7,"databaseName":"GaussDB-A","url":"jdbc:postgresql://db/core","user":"compare","driver":"org.postgresql.Driver","encryption":"1","newPassword":"secret"}

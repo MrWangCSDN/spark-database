@@ -25,3 +25,12 @@ describe('currentSchemaError', () => {
     expect(currentSchemaError(url, driver)).toBeNull()
   })
 })
+
+describe('GDB/MySQL compatibility', () => {
+  it.each([
+    ['jdbc:gdb://db/core', 'com.mysql.jdbc.Driver'],
+    ['jdbc:mysql://db/core', 'vendor.gdb.Driver']
+  ])('does not require currentSchema for %s', (url, driver) => {
+    expect(currentSchemaError(url, driver)).toBeNull()
+  })
+})
