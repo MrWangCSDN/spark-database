@@ -30,6 +30,15 @@ class JdbcCurrentSchemaPolicyTest {
         )).doesNotThrowAnyException();
     }
 
+    @Test void doesNotApplyPostgresSchemaRuleToGdbMysqlCompatibleConnections() {
+        assertThatCode(() -> JdbcCurrentSchemaPolicy.requireValid(
+            "jdbc:gdb://db/core", "com.mysql.jdbc.Driver"
+        )).doesNotThrowAnyException();
+        assertThatCode(() -> JdbcCurrentSchemaPolicy.requireValid(
+            "jdbc:mysql://db/core", "vendor.gdb.Driver"
+        )).doesNotThrowAnyException();
+    }
+
     private static void assertRequired(String url, String driver) {
         assertThatThrownBy(() -> JdbcCurrentSchemaPolicy.requireValid(url, driver))
             .isInstanceOfSatisfying(ApiException.class, error -> {

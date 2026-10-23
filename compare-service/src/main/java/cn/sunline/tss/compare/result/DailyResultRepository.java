@@ -2,11 +2,14 @@ package cn.sunline.tss.compare.result;
 
 import cn.sunline.tss.compare.api.ApiException;
 import cn.sunline.tss.compare.api.PageResult;
+import cn.sunline.tss.compare.metadata.MetadataDbType;
+import cn.sunline.tss.compare.metadata.MetadataSqlDialect;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.*;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
 import javax.sql.DataSource;
 import java.util.*;
@@ -16,10 +19,15 @@ public class DailyResultRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final ObjectMapper json;
+    private final MetadataSqlDialect dialect;
     private static final RowMapper<DailyResultSummary> MAPPER=DataClassRowMapper.newInstance(DailyResultSummary.class);
     public DailyResultRepository(DataSource source,ObjectMapper json) {
+        this(source, json, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
+    }
+    @Autowired
+    public DailyResultRepository(DataSource source,ObjectMapper json, MetadataSqlDialect dialect) {
         jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(30);
-        transaction=new TransactionTemplate(new DataSourceTransactionManager(source));this.json=json;
+        transaction=new TransactionTemplate(new DataSourceTransactionManager(source));this.json=json;this.dialect=dialect;
     }
     public record ConnectionGroup(Long originDatabaseId,String originDatabaseName,Long destinationDatabaseId,String destinationDatabaseName,long objectCount) {}
     public record Results(PageResult<DailyResultSummary> results,List<ConnectionGroup> connections) {}
@@ -27,7 +35,9 @@ public class DailyResultRepository {
     public record Samples(DailyResultSummary summary,List<Sample> items,int page,int size,long total) {}
     public Results list(String date,int page,int size) {
         long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=?",Long.class,date);
-        var items=jdbc.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=? ORDER BY BCOMP_INDEX OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",MAPPER,date,(long)page*size,size);
+        var pageSql=dialect.page("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=? ORDER BY BCOMP_INDEX",(long)page*size,size);
+        var pageParams=new ArrayList<Object>();pageParams.add(date);pageParams.addAll(pageSql.parameters());
+        var items=jdbc.query(pageSql.sql(),MAPPER,pageParams.toArray());
         var groups=jdbc.query("SELECT ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,COUNT(*) FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=? GROUP BY ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME ORDER BY ORIGIN_DATABASE_ID,DESTINATION_DATABASE_ID",
             (rs,n)->new ConnectionGroup(rs.getObject(1,Long.class),rs.getString(2),rs.getObject(3,Long.class),rs.getString(4),rs.getLong(5)),date);
         return new Results(new PageResult<>(items,page,size,total),groups);
@@ -67,21 +77,25 @@ public class DailyResultRepository {
                 total=counts.get(0);
             } else total=switch(type) { case "2" -> summary.destinationSamples();case "3" -> summary.originSamples();default -> summary.differentSamples(); };
             String sql="SELECT COMP_INDEX_STR,DETAIL_JSON FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND LINE_RESULT=?"
-                +(patternId==null?"":" AND PATTERN_ID=?")+" ORDER BY SAMPLE_NO OFFSET ? ROWS FETCH NEXT ? ROWS ONLY";
+                +(patternId==null?"":" AND PATTERN_ID=?")+" ORDER BY SAMPLE_NO";
+            var pageSql=dialect.page(sql,(long)page*size,size);
             RowMapper<Sample> mapper=(rs,n)->{
                 try { return new Sample(rs.getString(1),json.readTree(rs.getString(2))); }
                 catch(java.io.IOException e){ throw new java.sql.SQLException("差异样本格式错误",e); }
             };
-            List<Sample> rows=patternId==null
-                ?jdbc.query(sql,mapper,index,date,type,(long)page*size,size)
-                :jdbc.query(sql,mapper,index,date,type,patternId,(long)page*size,size);
+            var pageParams=new ArrayList<Object>();pageParams.add(index);pageParams.add(date);pageParams.add(type);
+            if(patternId!=null) pageParams.add(patternId);
+            pageParams.addAll(pageSql.parameters());
+            List<Sample> rows=jdbc.query(pageSql.sql(),mapper,pageParams.toArray());
             return new Samples(summary,rows,page,size,total);
         });
     }
     /** Lock/recheck each bounded publication, sharing publisher lock order on the summary row. */
     public int expire(String cutoff) {
-        var candidates=jdbc.query("SELECT BCOMP_INDEX,RESULT_DATE FROM TSS_BCOMP_RESULT_NEW WHERE DETAILS_EXPIRED='0' AND PUBLISHED_AT<? ORDER BY PUBLISHED_AT OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY",
-            (rs,n)->Map.entry(rs.getLong(1),rs.getString(2)),cutoff);
+        var candidateSql=dialect.limit("SELECT BCOMP_INDEX,RESULT_DATE FROM TSS_BCOMP_RESULT_NEW WHERE DETAILS_EXPIRED='0' AND PUBLISHED_AT<? ORDER BY PUBLISHED_AT",100);
+        var candidateParams=new ArrayList<Object>();candidateParams.add(cutoff);candidateParams.addAll(candidateSql.parameters());
+        var candidates=jdbc.query(candidateSql.sql(),
+            (rs,n)->Map.entry(rs.getLong(1),rs.getString(2)),candidateParams.toArray());
         int expired=0;
         for(var candidate:candidates) {
             Boolean changed=transaction.execute(status->{

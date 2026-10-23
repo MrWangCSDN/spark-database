@@ -1,5 +1,7 @@
 package cn.sunline.tss.compare;
 
+import cn.sunline.tss.compare.metadata.MetadataDatabasePreflight;
+import cn.sunline.tss.compare.metadata.MetadataDbType;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +23,13 @@ public class RuntimeConfiguration {
         source.setMinimumIdle(env.getProperty("spring.datasource.hikari.minimum-idle",Integer.class,1));
         source.setConnectionTimeout(env.getProperty("spring.datasource.hikari.connection-timeout",Long.class,30000L));
         source.setPoolName("tss-compare-metadata");
+        try {
+            new MetadataDatabasePreflight(MetadataDbType.parse(env.getProperty("bd.metadata-db-type", "GAUSSDB")))
+                .validate(source);
+        } catch (RuntimeException error) {
+            source.close();
+            throw error;
+        }
         return source;
     }
     private String property(Environment env,String legacy,String name) {

@@ -1,7 +1,9 @@
 package cn.sunline.tss.compare.configuration;
 
 import cn.sunline.tss.compare.api.PageResult;
+import cn.sunline.tss.compare.metadata.MetadataSqlDialect;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -16,8 +18,14 @@ import java.io.Reader;
 public class ConfigurationRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final MetadataSqlDialect dialect;
     public ConfigurationRepository(DataSource source,@Value("${compare.jdbc-query-timeout-seconds:30}")int timeout){
+        this(source, timeout, MetadataSqlDialect.forType(cn.sunline.tss.compare.metadata.MetadataDbType.GAUSSDB));
+    }
+    @Autowired
+    public ConfigurationRepository(DataSource source,@Value("${compare.jdbc-query-timeout-seconds:30}")int timeout, MetadataSqlDialect dialect){
         jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(timeout);transaction=new TransactionTemplate(new DataSourceTransactionManager(source));
+        this.dialect=dialect;
     }
 
     ConfigurationDetail find(long index){
@@ -33,8 +41,9 @@ public class ConfigurationRepository {
 
     PageResult<BasicConfiguration> list(int page,int size){
         Long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2'",Long.class);
-        List<BasicConfiguration> items=jdbc.query("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2' ORDER BY BCOMP_INDEX OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
-            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9)),page*size,size);
+        var pageSql=dialect.page("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2' ORDER BY BCOMP_INDEX",(long)page*size,size);
+        List<BasicConfiguration> items=jdbc.query(pageSql.sql(),
+            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9)),pageSql.parameters().toArray());
         return new PageResult<>(items,page,size,total==null?0:total);
     }
 

@@ -1,7 +1,10 @@
 package cn.sunline.tss.compare.task;
 
 import cn.sunline.tss.compare.api.PageResult;
+import cn.sunline.tss.compare.metadata.MetadataDbType;
+import cn.sunline.tss.compare.metadata.MetadataSqlDialect;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -32,12 +35,21 @@ public class TaskManagementRepository {
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final MetadataSqlDialect dialect;
 
+    @Autowired
     public TaskManagementRepository(DataSource source,
                                     @Value("${compare.jdbc-query-timeout-seconds:30}") int queryTimeout) {
+        this(source, queryTimeout, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
+    }
+
+    public TaskManagementRepository(DataSource source,
+                                    @Value("${compare.jdbc-query-timeout-seconds:30}") int queryTimeout,
+                                    MetadataSqlDialect dialect) {
         this.jdbc = new JdbcTemplate(source);
         this.jdbc.setQueryTimeout(queryTimeout);
         this.transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
+        this.dialect = dialect;
     }
 
     ConfigurationStatus configurationStatus(long index) {
@@ -113,10 +125,11 @@ public class TaskManagementRepository {
         }
         Long total = jdbc.queryForObject("SELECT COUNT(*)" + TASK_FROM + where,
             Long.class, params.toArray());
+        var pageSql = dialect.page(SELECT_TASK + where + " ORDER BY " + search.orderBy(),
+            (long) search.page() * search.size(), search.size());
         List<Object> pageParams = new ArrayList<>(params);
-        pageParams.add(search.page() * search.size()); pageParams.add(search.size());
-        List<TaskSummary> items = jdbc.query(SELECT_TASK + where + " ORDER BY " + search.orderBy() + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
-            TASK_MAPPER, pageParams.toArray());
+        pageParams.addAll(pageSql.parameters());
+        List<TaskSummary> items = jdbc.query(pageSql.sql(), TASK_MAPPER, pageParams.toArray());
         return new PageResult<>(items, search.page(), search.size(), total == null ? 0 : total);
     }
 
@@ -133,8 +146,10 @@ public class TaskManagementRepository {
         add(where, params, "LINE_RESULT=?", blankToNull(lineResult));
         add(where, params, "COMP_INDEX_STR=?", blankToNull(businessKey));
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW" + where, Long.class, params.toArray());
-        params.add(page * size); params.add(size);
-        List<DifferenceSummary> items = jdbc.query("SELECT COMP_INDEX_STR,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON FROM TSS_BCOMP_DTL_NEW" + where + " ORDER BY COMP_INDEX_STR OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
+        var pageSql = dialect.page("SELECT COMP_INDEX_STR,LINE_CONTENT1,LINE_CONTENT2,LINE_RESULT,FDTL_REASON FROM TSS_BCOMP_DTL_NEW" + where + " ORDER BY COMP_INDEX_STR",
+            (long) page * size, size);
+        params.addAll(pageSql.parameters());
+        List<DifferenceSummary> items = jdbc.query(pageSql.sql(),
             (rs, n) -> new DifferenceSummary(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)), params.toArray());
         return new PageResult<>(items, page, size, total == null ? 0 : total);
     }
@@ -144,7 +159,8 @@ public class TaskManagementRepository {
         long running = count("TASK_STATE='2'", new Object[0]);
         long completed = count("TASK_BUSI_DATE=? AND TASK_STATE='3'", new Object[]{today});
         long differences = count("TASK_BUSI_DATE=? AND TASK_STATE='3' AND TASK_RESULT='1'", new Object[]{today});
-        List<TaskSummary> recent = jdbc.query(SELECT_TASK + " WHERE " + VISIBLE_TASK + " ORDER BY t.CREATE_DATETIME DESC,t.BCOMP_INDEX ASC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY", TASK_MAPPER);
+        var recentSql = dialect.limit(SELECT_TASK + " WHERE " + VISIBLE_TASK + " ORDER BY t.CREATE_DATETIME DESC,t.BCOMP_INDEX ASC", 8);
+        List<TaskSummary> recent = jdbc.query(recentSql.sql(), TASK_MAPPER, recentSql.parameters().toArray());
         return new DashboardSummary(serviceStatus, running, completed, differences,
             LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME), recent);
     }

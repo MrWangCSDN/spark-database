@@ -1,8 +1,11 @@
 package cn.sunline.tss.compare.batch;
 
 import cn.sunline.tss.compare.api.PageResult;
+import cn.sunline.tss.compare.metadata.MetadataDbType;
+import cn.sunline.tss.compare.metadata.MetadataSqlDialect;
 import cn.sunline.tss.compare.task.TaskSummary;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
@@ -37,18 +40,26 @@ public class BatchRepository {
     private static final String SUMMARY_GROUP = " GROUP BY b.BATCH_ID,b.TASK_BUSI_DATE,b.VERIFY_BUSINESS_DATE,b.CREATED_AT,b.SOURCE_BATCH_ID,b.TOTAL_COUNT ";
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final MetadataSqlDialect dialect;
 
     public BatchRepository(DataSource source, @Value("${compare.jdbc-query-timeout-seconds:30}") int timeout) {
+        this(source, timeout, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
+    }
+
+    @Autowired
+    public BatchRepository(DataSource source, @Value("${compare.jdbc-query-timeout-seconds:30}") int timeout,
+                           MetadataSqlDialect dialect) {
         jdbc = new JdbcTemplate(source);
         jdbc.setQueryTimeout(timeout);
         transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
+        this.dialect = dialect;
     }
 
     <T> T inTransaction(Supplier<T> operation) { return transaction.execute(status -> operation.get()); }
 
     List<Long> allConfigurationIds() {
-        return jdbc.query("SELECT BCOMP_INDEX FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2' ORDER BY BCOMP_INDEX FETCH FIRST 5001 ROWS ONLY",
-            (rs, n) -> rs.getLong(1));
+        var page = dialect.limit("SELECT BCOMP_INDEX FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2' ORDER BY BCOMP_INDEX", 5001);
+        return jdbc.query(page.sql(), (rs, n) -> rs.getLong(1), page.parameters().toArray());
     }
 
     Map<Long, Configuration> configurations(List<Long> ids) {
@@ -88,9 +99,11 @@ public class BatchRepository {
     }
 
     List<SourceItem> failedItems(String batchId) {
-        return jdbc.query("SELECT i.BCOMP_INDEX,i.CONFIGURATION_NAME,i.CONFIGURATION_MODULE,i.TIME_NODE,i.VERIFY_BUSINESS_DATE,i.CONFIGURATION_HASH"
-                + ITEM_JOIN + " WHERE b.BATCH_ID=? AND t.TASK_STATE='4' ORDER BY i.BCOMP_INDEX FETCH FIRST 5001 ROWS ONLY",
-            (rs, n) -> new SourceItem(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6)), batchId);
+        var page = dialect.limit("SELECT i.BCOMP_INDEX,i.CONFIGURATION_NAME,i.CONFIGURATION_MODULE,i.TIME_NODE,i.VERIFY_BUSINESS_DATE,i.CONFIGURATION_HASH"
+                + ITEM_JOIN + " WHERE b.BATCH_ID=? AND t.TASK_STATE='4' ORDER BY i.BCOMP_INDEX", 5001);
+        var params = new ArrayList<Object>(); params.add(batchId); params.addAll(page.parameters());
+        return jdbc.query(page.sql(),
+            (rs, n) -> new SourceItem(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6)), params.toArray());
     }
 
     ExistingRequest findRequest(String requestId) {
@@ -130,8 +143,8 @@ public class BatchRepository {
 
     PageResult<BatchSummary> list(int page, int size) {
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_BATCH_NEW", Long.class);
-        var items = jdbc.query(SUMMARY_SELECT + SUMMARY_GROUP + " ORDER BY b.CREATED_AT DESC,b.BATCH_ID DESC OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
-            (rs, n) -> summary(rs), (long) page * size, size);
+        var pageSql = dialect.page(SUMMARY_SELECT + SUMMARY_GROUP + " ORDER BY b.CREATED_AT DESC,b.BATCH_ID DESC", (long) page * size, size);
+        var items = jdbc.query(pageSql.sql(), (rs, n) -> summary(rs), pageSql.parameters().toArray());
         return new PageResult<>(items, page, size, total == null ? 0 : total);
     }
 
@@ -148,15 +161,17 @@ public class BatchRepository {
         };
         String where = " WHERE b.BATCH_ID=?" + filter;
         Long total = jdbc.queryForObject("SELECT COUNT(*)" + ITEM_JOIN + where, Long.class, batchId);
-        var items = jdbc.query("""
+        var pageSql = dialect.page("""
             SELECT i.BCOMP_INDEX,i.CONFIGURATION_NAME,b.TASK_BUSI_DATE,i.VERIFY_BUSINESS_DATE,b.BATCH_ID,i.TIME_NODE,
               COALESCE(t.CREATE_DATETIME,b.CREATED_AT),t.BEGIN_DATETIME,t.END_DATETIME,t.TASK_STATE,t.TASK_RESULT,
               t.FTASK_REASON,t.FILE1_ACOUNT,t.FILE2_ACOUNT,t.FILE1_SCOUNT,t.FILE2_SCOUNT,t.FILE1_FCOUNT,t.FILE2_FCOUNT,t.BCOMP_READ_MODE,t.RESULT_DATE
-            """ + ITEM_JOIN + where + " ORDER BY i.BCOMP_INDEX OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
+            """ + ITEM_JOIN + where + " ORDER BY i.BCOMP_INDEX", (long) page * size, size);
+        var pageParams = new ArrayList<Object>(); pageParams.add(batchId); pageParams.addAll(pageSql.parameters());
+        var items = jdbc.query(pageSql.sql(),
             (rs, n) -> new TaskSummary(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
                 rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12),
                 nullableLong(rs, 13), nullableLong(rs, 14), nullableLong(rs, 15), nullableLong(rs, 16), nullableLong(rs, 17), nullableLong(rs, 18), rs.getString(19), rs.getString(20)),
-            batchId, (long) page * size, size);
+            pageParams.toArray());
         return new PageResult<>(items, page, size, total == null ? 0 : total);
     }
 
