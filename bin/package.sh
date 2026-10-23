@@ -15,6 +15,7 @@ cp compare-spark/target/compare-spark-1.0.0-SNAPSHOT.jar "$bundle/jobs/"
 cp compare-spark/target/jdbc/*.jar "$bundle/drivers/"
 cp config/application-local.properties.example "$bundle/config/"
 cp config/application-local.properties.example "$bundle/config/application-local.properties"
+cp config/application-gdb.properties.example "$bundle/config/"
 # 仅打包占位模板，禁止把本机真实环境凭据带入发布包。
 cp config/bd.env.example "$bundle/config/bd.env"
 chmod 600 "$bundle/config/bd.env"

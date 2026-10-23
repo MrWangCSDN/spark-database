@@ -92,6 +92,16 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 5. `bin/start.sh` 使用 Boot PropertiesLauncher 的 `loader.path` 把 `drivers/` 加入服务类路径，并通过 `COMPARE_SPARK_JARS` 将同目录 JAR 传给 Spark `--jars`。如直接沿用旧Spark属性文件，需要补充 `compare.spark-jars=${COMPARE_SPARK_JARS:}` 或显式填写逗号分隔的驱动绝对路径。原生驱动必须在每个 Spark 节点可读，Driver和Executor节点必须能访问原库、目标库、元数据库。
 6. 元库凭据及源库凭据保持原加密协议；例子中的环境变量如下，由部署环境设置真实值。也可写入发布目录的 `config/bd.env`，根目录 `start.sh` 会通过 `bin/start.sh` 自动加载：
 
+### GDB 控制面与 GDB 比对连接
+
+需要让 bd 控制面运行在 GDB 时，将 `BD_METADATA_DB_TYPE` 设为 `GDB`，使用 `config/application-gdb.properties.example` 的 MySQL 兼容 URL，并把现场提供的 `gdb_mysql-connector-java-5.1.46.jar`（或同版本厂商驱动）放入 `drivers/`。默认驱动类为 `com.mysql.jdbc.Driver`；如果厂商驱动使用其他类名或 URL 前缀，只修改 `TSS_METADATA_DRIVER`、`TSS_METADATA_URL` 和 `SPARK_GDB_JDBC_URL_PREFIXES`。
+
+GDB 控制面首次部署执行 `sql/create_bcomp_gdb.sql`；已有环境按停服务、排空 Spark 后执行对应 `sql/*_gdb.sql` 增量脚本。应用启动会校验 `BD_METADATA_DB_TYPE` 与实际 JDBC 产品是否匹配，GDB 不需要 `currentSchema`；GaussDB/PostgreSQL 连接仍必须提供非空 `currentSchema`。应用不会自动执行 DDL。
+
+任务两侧连接可以独立选择 GDB 或 GaussDB，支持 GDB-GDB、GDB-GaussDB、GaussDB-GDB 和 GaussDB-GaussDB。两侧仍必须把完整业务键配置为 `FIELD_INDEX_FLAG='1'`；数据库唯一索引不会被服务自动读取。GDB 分区读取使用 MySQL 兼容 CRC32 HASH，服务会把同一驱动 JAR 传给 Spark Driver 和 Executor。
+
+部署验收顺序：停止旧 bd 并确认在途 Spark 已结束 → 创建/升级 GDB 元数据库 → 将 GDB 驱动放入服务和 Spark 节点的 `drivers/` → 设置类型、URL、驱动和凭据 → 页面分别测试元库及两侧业务连接 → 用小表执行一笔 GDB-GDB 和一笔混合数据库任务 → 检查 `BCOMP_READ_MODE` 后再恢复正常调度。回滚时先停新服务并确认 Spark 终态，再恢复旧服务和旧 GaussDB 配置；不要让旧 Spark JAR 读取新 GDB 控制面脚本。
+
 ```bash
 export JAVA_HOME=/path/to/jdk17
 export SPARK_HOME=/path/to/spark-3.5.3-bin-hadoop3

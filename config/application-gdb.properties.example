@@ -1,0 +1,16 @@
+# GDB/MySQL-compatible control-plane example.
+# Copy to config/application-local.properties and replace placeholders.
+bd.metadata-db-type=GDB
+spring.datasource.dynamic.primary=frw
+spring.datasource.dynamic.datasource.frw.url=${TSS_METADATA_URL:jdbc:mysql://gdb-host:3306/tss_compare?useUnicode=true&characterEncoding=UTF-8&useSSL=false}
+spring.datasource.dynamic.datasource.frw.username=${TSS_METADATA_USER:compare}
+spring.datasource.dynamic.datasource.frw.password=${TSS_METADATA_PASSWORD:}
+spring.datasource.dynamic.datasource.frw.driver-class-name=${TSS_METADATA_DRIVER:com.mysql.jdbc.Driver}
+
+# The same metadata connection is passed to Spark for result publication.
+spark.datasource.url=${spring.datasource.dynamic.datasource.frw.url}
+spark.datasource.username=${spring.datasource.dynamic.datasource.frw.username}
+spark.datasource.password=${spring.datasource.dynamic.datasource.frw.password}
+spark.datasource.driver-class-name=${spring.datasource.dynamic.datasource.frw.driver-class-name}
+# Add vendor prefixes if the GDB driver does not expose jdbc:mysql:.
+spark.gdb.jdbc-url-prefixes=${SPARK_GDB_JDBC_URL_PREFIXES:jdbc:mysql:,jdbc:gdb:,jdbc:gbase:}

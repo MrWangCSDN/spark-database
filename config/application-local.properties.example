@@ -56,3 +56,7 @@ compare.database-test-max-concurrency=4
 # 0表示不限制作业运行时间，符合原来一直等待的行为。
 compare.spark-timeout-seconds=0
 server.port=${SERVER_PORT:8899}
+
+# Metadata control-plane dialect: GAUSSDB (default) or GDB.
+bd.metadata-db-type=${BD_METADATA_DB_TYPE:GAUSSDB}
+spark.gdb.jdbc-url-prefixes=${SPARK_GDB_JDBC_URL_PREFIXES:jdbc:mysql:,jdbc:gdb:,jdbc:gbase:}
