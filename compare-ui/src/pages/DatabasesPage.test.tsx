@@ -146,7 +146,7 @@ test('requires currentSchema before testing or saving a PostgreSQL-compatible co
   const user = userEvent.setup()
   renderPage(<DatabasesPage />)
   await user.click(await screen.findByRole('button', { name: '新建连接' }))
-  expect(screen.getByLabelText('JDBC URL')).toHaveAttribute('placeholder', 'jdbc:postgresql://host:5432/database?currentSchema=业务schema')
+  expect(screen.getByLabelText('JDBC URL')).toHaveAttribute('placeholder', 'jdbc:mysql://host:3306/database 或 jdbc:postgresql://host:5432/database?currentSchema=业务schema')
   await user.type(screen.getByLabelText('连接编号'), '9')
   await user.type(screen.getByLabelText('连接名称'), 'GaussDB A')
   await user.type(screen.getByLabelText('JDBC URL'), 'jdbc:postgresql://db/core')
