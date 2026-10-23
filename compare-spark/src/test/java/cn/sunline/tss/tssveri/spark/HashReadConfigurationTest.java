@@ -17,7 +17,7 @@ class HashReadConfigurationTest {
     @Test void predicateConnectionsCarryTimeoutsAndMysqlStreamingCursorProperties() throws Exception {
         var builder=SparkHandlerTable.class.getDeclaredMethod("buildConnProps",String.class,String.class,String.class);
         builder.setAccessible(true);
-        for (String driver : List.of("com.mysql.cj.jdbc.Driver","com.mysql.jdbc.Driver","com.oceanbase.jdbc.Driver")) {
+        for (String driver : List.of("com.mysql.cj.jdbc.Driver","com.mysql.jdbc.Driver","com.oceanbase.jdbc.Driver","com.gbase.jdbc.Driver")) {
             Properties props=(Properties) builder.invoke(null,"user","password",driver);
             assertEquals("true",props.getProperty("useCursorFetch"),driver);
             assertEquals("1000",props.getProperty("fetchsize"),driver);

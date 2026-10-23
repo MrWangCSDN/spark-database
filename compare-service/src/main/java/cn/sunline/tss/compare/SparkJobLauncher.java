@@ -52,6 +52,7 @@ public class SparkJobLauncher implements JobLauncher {
         int detailLimit=env.getProperty("compare.result.detail-limit",Integer.class,100);
         if(detailLimit<0||detailLimit>10000) throw new IllegalArgumentException("差异明细上限必须在0..10000之间");
         launcher.setConf("spark.compare.detailLimit",Integer.toString(detailLimit));
+        launcher.setConf("spark.gdb.jdbc-url-prefixes", env.getProperty("spark.gdb.jdbc-url-prefixes", "jdbc:mysql:,jdbc:gdb:,jdbc:gbase:"));
         String opens="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED -XX:+IgnoreUnrecognizedVMOptions";
         launcher.setConf("spark.driver.extraJavaOptions",env.getProperty("spark.driver.extraJavaOptions",opens));
         launcher.setConf("spark.executor.extraJavaOptions",env.getProperty("spark.executor.extraJavaOptions",opens));

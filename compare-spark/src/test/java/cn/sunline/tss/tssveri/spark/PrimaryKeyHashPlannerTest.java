@@ -50,6 +50,15 @@ class PrimaryKeyHashPlannerTest {
         assertThrows(IllegalArgumentException.class, () -> PrimaryKeyHashPlanner.dialect("Unknown","jdbc:postgresql:x",null));
         assertThrows(IllegalArgumentException.class, () -> PrimaryKeyHashPlanner.dialect("OceanBase","jdbc:oceanbase:x",null));
     }
+
+    @Test void gdbAndMysqlUseCrc32HashDialect() {
+        assertEquals(PrimaryKeyHashPlanner.Dialect.MYSQL, PrimaryKeyHashPlanner.dialect("GDB", "jdbc:gdb:x", null));
+        assertEquals(PrimaryKeyHashPlanner.Dialect.MYSQL, PrimaryKeyHashPlanner.dialect("MySQL", "jdbc:mysql:x", null));
+        String expression = PrimaryKeyHashPlanner.Dialect.MYSQL.hash("`ID`");
+        assertTrue(expression.contains("CRC32"));
+        assertTrue(expression.contains("COALESCE"));
+        assertTrue(expression.contains("CAST(`ID` AS CHAR)"));
+    }
     @Test void singlePartitionNeedsNoHashFunctionOrDialect() throws Exception {
         try (Connection c=DriverManager.getConnection("jdbc:h2:mem:single")) {
             assertNull(PrimaryKeyHashPlanner.predicates(c,"(select 1 as ID) src",List.of(1),1));

@@ -115,6 +115,7 @@ public class SparkHandlerTable {
                 // AQE优化：建议分区大小为64MB，适合有限资源场景
                 .config("spark.sql.adaptive.advisoryPartitionSizeInBytes", "64m")
                 .getOrCreate();
+        GdbJdbcDialect.register(sc.conf().get("spark.gdb.jdbc-url-prefixes", "jdbc:mysql:,jdbc:gdb:,jdbc:gbase:"));
 
         Class.forName(args[tssDataSourceDriver]);
         try (Connection connectionOut=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
@@ -557,7 +558,7 @@ public class SparkHandlerTable {
         try (Connection connection = DriverManager.getConnection(url, user, password)) {
             predicates = PrimaryKeyHashPlanner.predicates(connection, source, keys, count);
         }
-        String mode = "HASH主键读取(" + count + "分区)";
+        String mode = "HASH" + dialectLabel(url, driver) + "主键读取(" + count + "分区)";
         log.info("{}表使用{}", side, mode);
         if (predicates == null) return SidePlan.ofOptions(side, mode, buildJdbcConfig(url, user, password, driver, source));
         return SidePlan.ofPredicates(side, mode, url, source, buildConnProps(user, password, driver), predicates);
@@ -598,7 +599,15 @@ public class SparkHandlerTable {
     /** Positive fetch size requires server-side cursors for MySQL Connector/J and OceanBase. */
     private static boolean requiresCursorFetch(String driver) {
         String name = Objects.toString(driver, "").toLowerCase(Locale.ROOT);
-        return name.contains("oceanbase") || name.equals("com.mysql.cj.jdbc.driver") || name.equals("com.mysql.jdbc.driver");
+        return name.contains("oceanbase") || name.contains("gdb") || name.contains("gbase")
+                || name.equals("com.mysql.cj.jdbc.driver") || name.equals("com.mysql.jdbc.driver");
+    }
+
+    private static String dialectLabel(String url, String driver) {
+        String value = (Objects.toString(url, "") + " " + Objects.toString(driver, "")).toLowerCase(Locale.ROOT);
+        if (value.contains("mysql") || value.contains("gdb") || value.contains("gbase")) return "GDB/MySQL";
+        if (value.contains("postgres") || value.contains("gauss") || value.contains("opengauss")) return "GaussDB/PostgreSQL";
+        return "JDBC";
     }
 
     /**
