@@ -15,11 +15,11 @@ import java.util.List;
 public class DatabaseManagementRepository {
     private final JdbcTemplate jdbc;
     private final MetadataSqlDialect dialect;
-    @Autowired
     public DatabaseManagementRepository(DataSource source,
                                         @Value("${compare.jdbc-query-timeout-seconds:30}") int queryTimeout) {
         this(source, queryTimeout, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
     }
+    @Autowired
     public DatabaseManagementRepository(DataSource source,
                                         @Value("${compare.jdbc-query-timeout-seconds:30}") int queryTimeout,
                                         MetadataSqlDialect dialect) {
