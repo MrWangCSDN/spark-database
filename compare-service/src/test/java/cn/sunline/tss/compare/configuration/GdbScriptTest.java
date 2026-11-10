@@ -23,6 +23,8 @@ class GdbScriptTest {
         }
         assertTrue(sql.contains("CREATE UNIQUE INDEX idx_bcomp_dtl_daily_sample"));
         assertTrue(sql.contains("START TRANSACTION"));
+        assertTrue(sql.contains("REVISER_NAME VARCHAR(100)"));
+        assertTrue(sql.contains("REVISER_USERNAME VARCHAR(100)"));
     }
 
     @Test

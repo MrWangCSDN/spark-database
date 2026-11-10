@@ -92,6 +92,76 @@ class ConfigurationApiTest {
             .replace("16,'HASH');", "16,'HASH',"+limit+");");
     }
 
+    String reviserScript(String name, String username) {
+        return sampleScript("100")
+            .replace("bcomp_sample_limit)", "bcomp_sample_limit,reviser_name,reviser_username)")
+            .replace("16,'HASH',100);", "16,'HASH',100,"+name+","+username+");");
+    }
+
+    @Test void importsReviserMetadataAndPreservesItWhenEditingConfiguration() throws Exception {
+        mvc(() -> {}).perform(multipart("/api/configurations/import")
+                .file(scriptFile(reviserScript("'张三 O''Brien'", "'c-zhangsan'"))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.configurationCount").value(1));
+        assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("张三 O'Brien");
+        assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("c-zhangsan");
+        mvc(() -> {}).perform(put("/api/configurations/1").contentType(APPLICATION_JSON).content(valid(1,"修改配置")))
+            .andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("张三 O'Brien");
+        assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("c-zhangsan");
+    }
+
+    @Test void importsNullableRevisersAndLegacyConfigurationLayouts() throws Exception {
+        String[] scripts = {
+            reviserScript("NULL", "null"),
+            reviserScript("'NULL'", "NULL"),
+            reviserScript("NULL", "'c-zhangsan'"),
+            axonScript("LEGACY"), hashScript("16", "'HASH'"), sampleScript("100")
+        };
+        String[] names = {null, "NULL", null, null, null, null};
+        String[] usernames = {null, null, "c-zhangsan", null, null, null};
+        for (int i=0; i<scripts.length; i++) {
+            mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(scripts[i])))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo(names[i]);
+            assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo(usernames[i]);
+        }
+    }
+
+    @Test void invalidReviserScriptsRollBackAndKeepNumericAndHashValidation() throws Exception {
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
+            .andExpect(status().isCreated());
+        String validScript = reviserScript("NULL", "NULL");
+        String[] invalidScripts = {
+            reviserScript("CURRENT_USER", "NULL"),
+            reviserScript("NULL", "COALESCE(NULL,'user')"),
+            reviserScript("NULL", "123"),
+            validScript.replace("16,'HASH',100,", "16,'HASH',NULL,"),
+            validScript.replace("'配置''说明'", "NULL"),
+            validScript.replace("16,'HASH',100,", "16,'RANGE',100,"),
+            validScript.replace("16,'HASH',100,", "257,'HASH',100,")
+        };
+        AtomicInteger reloads = new AtomicInteger();
+        for (String script : invalidScripts) {
+            mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import").file(scriptFile(script)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        }
+        assertThat(reloads).hasValue(0);
+        assertThat(jdbc.queryForObject("SELECT BCOMP_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(1);
+    }
+
+    @Test void reviserScriptOnUnmigratedSchemaRollsBackExistingConfiguration() throws Exception {
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW DROP COLUMN REVISER_NAME");
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW DROP COLUMN REVISER_USERNAME");
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(sampleScript("100"))))
+            .andExpect(status().isOk());
+        mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(reviserScript("'张三'", "'c-zhangsan'"))))
+            .andExpect(status().isUnprocessableEntity());
+        assertThat(jdbc.queryForObject("SELECT BCOMP_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("HASH_TABLE");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(1);
+    }
+
     @Test void importsSampleLimitsAndKeepsLegacyFallbackNullable() throws Exception {
         for (int limit : new int[]{0,37,1000,10000}) {
             mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(sampleScript(""+limit))))

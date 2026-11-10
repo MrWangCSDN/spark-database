@@ -1,0 +1,6 @@
+-- 已有 GaussDB 元数据库执行一次；先停止 bd 并确认在途 Spark 作业已结束。
+-- 设置与服务、Spark 相同的 search_path；保留现有配置，修订人信息保持 NULL。
+BEGIN;
+ALTER TABLE TSS_BCOMP_CONF_NEW ADD COLUMN REVISER_NAME VARCHAR(100);
+ALTER TABLE TSS_BCOMP_CONF_NEW ADD COLUMN REVISER_USERNAME VARCHAR(100);
+COMMIT;

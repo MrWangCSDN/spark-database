@@ -170,9 +170,11 @@ Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_
 
 新版 Axon-link 不再提供表级分区数调参；样本上限仍可由授权人员配置（0–10000，默认 100，0 表示只保存汇总）。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单。历史分区数接口和字段只作兼容，不能影响 bd 的实际运行分区数。
 
-样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为兼容值 1、`'HASH'` 和每个差异字段组合的样本上限（0–10000，Axon 新建配置默认 100）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。比对端兼容原 8 列、前版 10 列及新版 11 列脚本，新格式的非法兼容列值、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；运行时不会按这个列值确定实际分区数；全部表配置都必须包含主键。
+样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为兼容值 1、`'HASH'` 和每个差异字段组合的样本上限（0–10000，Axon 新建配置默认 100）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。新版导出还在末尾追加 `reviser_name,reviser_username` 两列，形成 13 列脚本；两列允许 NULL 或最长 100 字符的修订人姓名、用户名。比对端兼容原 8 列、前版 10 列、11 列及新版 13 列脚本，新格式的非法兼容列值、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；运行时不会按这个列值确定实际分区数；全部表配置都必须包含主键。
 
 导入新脚本前，目标元数据库必须已具备 `TSS_BCOMP_CONF_NEW.BCOMP_PARTITION_NUM`、`BCOMP_SHARD_STRATEGY` 和 nullable 的 `BCOMP_SAMPLE_LIMIT` 列（策略列需能保存 `HASH`）；已有元数据库先执行 `sql/add_bcomp_sample_limit_new.sql`，旧行保持 NULL，不回填默认值；应用不会自动修改生产表结构。旧版 Spark 不识别此哈希策略，必须同步升级服务和 Spark 作业 JAR，再使用新版脚本。历史版本已经生成的 SQL 保持不变；样本上限调整需生成新版本。
+
+修订人字段升级适用于已有 `_NEW` 元数据库。先停止 bd 并确认全部在途 Spark 作业已结束，再连接服务与 Spark 使用的同一元数据库。GaussDB 设置正确 `search_path` 后执行 `sql/add_bcomp_reviser_new.sql`；GDB/MySQL 选择正确数据库后执行 `sql/add_bcomp_reviser_gdb.sql`。确认 `TSS_BCOMP_CONF_NEW` 已有 nullable 的 `REVISER_NAME VARCHAR(100)`、`REVISER_USERNAME VARCHAR(100)`，再启动新版服务并导入 13 列脚本。两种增量脚本均保留已有配置，旧行两列为 NULL；按实际结构执行一次，部分执行后应先检查列是否存在。GDB/MySQL DDL 会隐式提交，不能依靠事务回滚升级。新建环境直接执行对应的最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql`，无需另跑修订人增量脚本。
 
 `HASH` 分区数为 1 时使用单分区读取；大于 1 时在数据库查询中按完整业务键生成互斥的哈希条件，由 Spark JDBC 并行读取各片，再执行既有核对逻辑。每侧实际读取方式写入 `BCOMP_READ_MODE`（目标列存在时）。不支持的数据库方言或不可用的哈希函数会明确失败，不自动伪装成单分区成功。
 

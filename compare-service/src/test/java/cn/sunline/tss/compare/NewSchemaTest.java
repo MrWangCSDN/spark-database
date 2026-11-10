@@ -18,6 +18,9 @@ class NewSchemaTest {
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_" + name + "_NEW", Long.class)).isZero();
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_IGNORE_VALUE_NEW", Long.class)).isZero();
+        jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,REVISER_NAME,REVISER_USERNAME) VALUES(1,?,?)", "名".repeat(100), "u".repeat(100));
+        assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1", String.class)).isEqualTo("名".repeat(100));
+        assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1", String.class)).isEqualTo("u".repeat(100));
         String wideSql = "x".repeat(12000);
         jdbc.update("INSERT INTO TSS_BCOMP_TABLE_SQL_NEW (BCOMP_INDEX,ORIG_SQL) VALUES (1,?)", wideSql);
         assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW", String.class)).isEqualTo(wideSql);
@@ -29,6 +32,23 @@ class NewSchemaTest {
         assertThat(jdbc.queryForObject("SELECT COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW", Integer.class)).isEqualTo(1);
         assertThatThrownBy(() -> jdbc.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET COLLAPSED_PATTERN_COUNT=0"))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test void reviserMigrationsPreserveExistingConfigurationAndAllowLegacyRows() {
+        for (String dialect : new String[]{"new", "gdb"}) {
+            String mode = dialect.equals("new") ? "PostgreSQL" : "MySQL";
+            var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=" + mode + ";DB_CLOSE_DELAY=-1", "sa", "");
+            var jdbc = new JdbcTemplate(ds);
+            jdbc.execute("CREATE TABLE TSS_BCOMP_CONF_NEW(BCOMP_INDEX BIGINT PRIMARY KEY,BCOMP_NAME VARCHAR(100))");
+            jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME) VALUES(1,'existing')");
+            new ResourceDatabasePopulator(new FileSystemResource("../sql/add_bcomp_reviser_" + dialect + ".sql")).execute(ds);
+            assertThat(jdbc.queryForObject("SELECT BCOMP_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1", String.class)).isEqualTo("existing");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW WHERE REVISER_NAME IS NULL AND REVISER_USERNAME IS NULL", Integer.class)).isEqualTo(1);
+            jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET REVISER_NAME=?,REVISER_USERNAME=? WHERE BCOMP_INDEX=1", "名".repeat(100), "u".repeat(100));
+            jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME) VALUES(2,'legacy')");
+            assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1", String.class)).isEqualTo("u".repeat(100));
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=2 AND REVISER_NAME IS NULL AND REVISER_USERNAME IS NULL", Integer.class)).isEqualTo(1);
+        }
     }
 
     @Test void patternOverflowMigrationDefaultsExistingRowsAndRejectsNonPositiveCounts() {

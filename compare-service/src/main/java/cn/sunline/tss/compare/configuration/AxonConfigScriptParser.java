@@ -16,6 +16,8 @@ final class AxonConfigScriptParser {
     private static final List<String> CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state");
     private static final List<String> HASH_CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state","bcomp_partition_num","bcomp_shard_strategy");
     private static final List<String> SAMPLE_CONF_COLUMNS = java.util.stream.Stream.concat(HASH_CONF_COLUMNS.stream(), java.util.stream.Stream.of("bcomp_sample_limit")).toList();
+    private static final List<String> REVISER_CONF_COLUMNS = java.util.stream.Stream.concat(SAMPLE_CONF_COLUMNS.stream(), java.util.stream.Stream.of("reviser_name","reviser_username")).toList();
+    private static final List<List<String>> CONF_LAYOUTS = List.of(CONF_COLUMNS,HASH_CONF_COLUMNS,SAMPLE_CONF_COLUMNS,REVISER_CONF_COLUMNS);
     private static final List<String> FIELD_COLUMNS = List.of("bcomp_index","field_name","field_type","field_memo","field_old_index","field_new_index","field_index_flag","field_enum_flag");
     private static final List<String> SQL_COLUMNS = List.of("bcomp_index","orig_sql","orig_database_id","dest_sql","dest_database_id");
 
@@ -102,16 +104,19 @@ final class AxonConfigScriptParser {
         List<String> columns = Pattern.compile("\\s*,\\s*").splitAsStream(matcher.group(2).trim()).map(value -> value.toLowerCase(Locale.ROOT)).toList();
         List<String> expected;
         int phase;
-        boolean sampleConfiguration = table.equals("tss_bcomp_conf_new") && columns.equals(SAMPLE_CONF_COLUMNS);
-        boolean hashConfiguration = sampleConfiguration || (table.equals("tss_bcomp_conf_new") && columns.equals(HASH_CONF_COLUMNS));
-        if (table.equals("tss_bcomp_conf_new")) { expected=sampleConfiguration ? SAMPLE_CONF_COLUMNS : hashConfiguration ? HASH_CONF_COLUMNS : CONF_COLUMNS; phase=0; }
+        if (table.equals("tss_bcomp_conf_new")) {
+            if (!CONF_LAYOUTS.contains(columns)) invalid();
+            expected=columns; phase=0;
+        }
         else if (table.equals("tss_bcomp_field_new")) { expected=FIELD_COLUMNS; phase=1; }
         else if (table.equals("tss_bcomp_table_sql_new")) { expected=SQL_COLUMNS; phase=2; }
         else { invalid(); return; }
         if (!columns.equals(expected) || phase < state.phase || phase > state.phase + 1) invalid();
         if (phase > state.phase && (state.phase == 0 ? state.confRows : state.fieldRows) == 0) invalid();
         state.phase = phase;
-        int rows = countLiteralRows(matcher.group(3), expected.size(), hashConfiguration);
+        boolean hashConfiguration = phase == 0 && columns.size() >= HASH_CONF_COLUMNS.size();
+        boolean reviserConfiguration = phase == 0 && columns.equals(REVISER_CONF_COLUMNS);
+        int rows = countLiteralRows(matcher.group(3), expected.size(), hashConfiguration, reviserConfiguration);
         state.hasHashConfigurations |= hashConfiguration;
         if (phase == 0) state.confRows += rows;
         else if (phase == 1) state.fieldRows += rows;
@@ -119,7 +124,7 @@ final class AxonConfigScriptParser {
         executor.accept(Command.insert(statement));
     }
 
-    private int countLiteralRows(String values, int columnCount, boolean hashConfiguration) {
+    private int countLiteralRows(String values, int columnCount, boolean hashConfiguration, boolean reviserConfiguration) {
         int position=0, rows=0;
         while (true) {
             position=skip(values,position);
@@ -132,6 +137,10 @@ final class AxonConfigScriptParser {
                 int tokenStart = position;
                 char c=values.charAt(position);
                 if (c=='\'') position=stringLiteral(values,position);
+                else if (reviserConfiguration && columns >= SAMPLE_CONF_COLUMNS.size()) {
+                    if (!values.regionMatches(true,position,"NULL",0,4)) invalid();
+                    position+=4;
+                }
                 else {
                     int start=position;
                     if (c=='-') position++;
