@@ -17,12 +17,13 @@ import java.util.Set;
 
 /** MySQL-compatible JDBC behavior for GDB and vendor URL prefixes. */
 public final class GdbJdbcDialect extends JdbcDialect {
+    private static final GdbJdbcDialect INSTANCE = new GdbJdbcDialect();
     private static final String DEFAULT_PREFIXES = "jdbc:mysql:,jdbc:gdb:,jdbc:gbase:";
     private static volatile Set<String> prefixes = parse(DEFAULT_PREFIXES);
 
     public static void register(String configuredPrefixes) {
         prefixes = parse(configuredPrefixes);
-        JdbcDialects.registerDialect(new GdbJdbcDialect());
+        JdbcDialects.registerDialect(INSTANCE);
     }
 
     public static void register() {

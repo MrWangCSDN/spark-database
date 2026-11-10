@@ -28,7 +28,7 @@ exec python3 -u -c 'import time; print("Started CompareApplication", flush=True)
 SPARK_HOME='{self.home}/spark'
 TSS_METADATA_DRIVER='org.opengauss.Driver'
 TSS_METADATA_URL='jdbc:opengauss://example/db'
-TSS_METADATA_PASSWORD='test-only'
+TSS_METADATA_PASSWORD='ENC(test-only)'
 BD_START_WAIT_SECONDS=3
 BD_STOP_TIMEOUT_SECONDS=3
 '''
@@ -40,7 +40,11 @@ BD_STOP_TIMEOUT_SECONDS=3
         p.chmod(0o755)
 
     def run_script(self, name):
-        return subprocess.run(['bash', str(self.home / name)], capture_output=True, text=True, errors="replace", timeout=10)
+        return subprocess.run(
+            ['bash', str(self.home / name)], capture_output=True, text=True,
+            errors="replace", timeout=10,
+            env={**os.environ, 'JASYPT_ENCRYPTOR_PASSWORD': 'lifecycle-test-only'},
+        )
 
     def tearDown(self):
         self.run_script('stop.sh')

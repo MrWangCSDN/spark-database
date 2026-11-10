@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class GdbScriptTest {
     @Test
     void gdbFullSchemaUsesMysqlCompatibleSyntaxAndKeepsAllTablesAndIndexes() throws Exception {
-        String sql = Files.readString(Path.of("sql/create_bcomp_gdb.sql"));
+        String sql = Files.readString(Path.of("../sql/create_bcomp_gdb.sql"));
         assertFalse(sql.contains("search_path"));
         assertFalse(sql.contains("FETCH FIRST"));
         assertFalse(sql.matches("(?s).*\\bTEXT\\b.*"));
@@ -28,7 +28,7 @@ class GdbScriptTest {
     @Test
     void gdbAxonExampleUsesFixedImportContractAndCompositeBusinessKeys() throws Exception {
         var parsed = new AxonConfigScriptParser().parse(
-            new StringReader(Files.readString(Path.of("docs/examples/axon-config-gdb.sql"))), command -> {});
+            new StringReader(Files.readString(Path.of("../docs/examples/axon-config-gdb.sql"))), command -> {});
         assertEquals(1, parsed.configurationCount());
         assertEquals(3, parsed.fieldCount());
         assertEquals(1, parsed.tableSqlCount());
@@ -37,7 +37,7 @@ class GdbScriptTest {
 
     @Test
     void gdbRuntimeCleanupUsesOneTruncateStatementPerTable() throws Exception {
-        String sql = Files.readString(Path.of("sql/clear_bcomp_runtime_data_gdb.sql"));
+        String sql = Files.readString(Path.of("../sql/clear_bcomp_runtime_data_gdb.sql"));
         assertFalse(sql.matches("(?is).*TRUNCATE\\s+TABLE[^;]*,[^;]*;.*"));
         assertTrue(sql.contains("TRUNCATE TABLE TSS_BCOMP_BATCH_ITEM_NEW;"));
         assertTrue(sql.contains("TRUNCATE TABLE TSS_BCOMP_RESULT_NEW;"));

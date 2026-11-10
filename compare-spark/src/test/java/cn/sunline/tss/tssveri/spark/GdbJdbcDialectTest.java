@@ -9,7 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class GdbJdbcDialectTest {
     @Test
-    void recognizesDefaultAndCustomGdbPrefixesAndUsesMysqlCursorSetup() throws Exception {
+    void repeatedRegistrationKeepsGdbPrefixesAndMysqlCursorSetup() throws Exception {
+        GdbJdbcDialect.register("jdbc:mysql:,jdbc:gdb:");
         GdbJdbcDialect.register("jdbc:mysql:,jdbc:gdb:");
         var gdb = JdbcDialects.get("jdbc:gdb://gdb/core");
         var mysql = new GdbJdbcDialect();
@@ -20,7 +21,7 @@ class GdbJdbcDialectTest {
             scala.collection.immutable.Map<String,String> options = new scala.collection.immutable.HashMap<>();
             options = options.$plus(new scala.Tuple2<>("fetchsize", "1000"));
             assertTrue(connection.getAutoCommit());
-            mysql.beforeFetch(connection, options);
+            gdb.beforeFetch(connection, options);
             assertFalse(connection.getAutoCommit());
         }
     }
