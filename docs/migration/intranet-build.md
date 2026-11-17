@@ -30,6 +30,8 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 ## 构建与验收
 
+唯一索引空键支持通过新版 Spark 作业生效。重新构建并部署服务与 Spark 发布物后，按原核对配置重跑业务日期，核对 NULL、空串、重复次数及两侧独有统计。含空键行按 SQL 返回的原始整行值计次，部署验收时使用两侧业务约定的金额、日期等输出格式。样本中的业务键保留 NULL，重复行按照样本限额保存。
+
 升级已有元数据库时，先在 bd 服务与 Spark 使用的 schema 执行 `sql/add_bcomp_result_module_new.sql`，再替换服务和 Spark JAR。新建环境直接使用包含领域列的 `sql/create_bcomp_new.sql`。历史结果的领域为空；新导入 Axon 配置并成功运行后，每日结果才会保存领域快照。
 
 Axon 新版 `_new` 导出为 13 列配置，在原 11 列后追加 nullable 的 `reviser_name,reviser_username`（各最长 100 字符）；导入同时兼容 8、10、11 列旧脚本。已有元数据库升级时，先停止 bd 并确认全部在途 Spark 作业结束，在服务与 Spark 使用的同一库执行修订人增量。GaussDB 先设置正确 `search_path`，执行 `sql/add_bcomp_reviser_new.sql`；GDB/MySQL 先选择正确数据库，执行 `sql/add_bcomp_reviser_gdb.sql`。确认两个 `VARCHAR(100)` 可空列已存在后，再启动新版服务并导入脚本。增量保留原配置，旧行修订人字段为 NULL；只执行一次，部分执行后先检查列是否存在。GDB/MySQL DDL 会隐式提交，事务不能保证升级回滚。全新空库分别使用最新 `sql/create_bcomp_new.sql`、`sql/create_bcomp_gdb.sql`，无需重复执行此增量。

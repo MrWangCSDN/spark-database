@@ -22,8 +22,10 @@ public class SampleRow implements Serializable {
         FieldValue(String name,String label,String a,String b) { this.name=name;this.label=label;originValue=a;destinationValue=b; }
     }
     static String keyValue(String value,String fieldType) {
-        if(value==null||value.trim().isEmpty()) throw new IllegalArgumentException("SQL结果出现空核对主键");
-        return "2".equals(fieldType) ? new java.math.BigDecimal(value.trim()).stripTrailingZeros().toPlainString() : value.trim();
+        if(value==null) return null;
+        String trimmed=value.trim();
+        if(trimmed.isEmpty()) return trimmed;
+        return "2".equals(fieldType) ? new java.math.BigDecimal(trimmed).stripTrailingZeros().toPlainString() : trimmed;
     }
     static String key(List<String> values) {
         try { return JSON.writeValueAsString(values); }

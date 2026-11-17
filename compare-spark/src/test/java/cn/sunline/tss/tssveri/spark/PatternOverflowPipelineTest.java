@@ -19,13 +19,14 @@ class PatternOverflowPipelineTest {
         return new GenericRowWithSchema(new Object[]{name,name,"1","0",null,null},schema);
     }
 
-    private static JavaPairRDD<String,Tuple2<Iterable<String[]>,Iterable<String[]>>> groups(JavaSparkContext spark,int count) {
-        var rows=new ArrayList<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>>();
+    private static JavaPairRDD<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>> groups(JavaSparkContext spark,int count) {
+        var rows=new ArrayList<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>>();
         for(int pattern=1;pattern<=count;pattern++) {
             String[] origin=new String[8],destination=new String[8];
             Arrays.fill(origin,"0");Arrays.fill(destination,"0");
             for(int bit=0;bit<8;bit++) if((pattern&(1<<bit))!=0) destination[bit]="1";
-            rows.add(new Tuple2<>(String.format("key-%03d",pattern),new Tuple2<>(Collections.singletonList(origin),Collections.singletonList(destination))));
+            String key=String.format("key-%03d",pattern);
+            rows.add(new Tuple2<>(key,new Tuple2<>(Collections.singletonList(new CountedRow(key,origin,false)),Collections.singletonList(new CountedRow(key,destination,false)))));
         }
         Collections.shuffle(rows,new Random(27));
         return spark.parallelizePairs(rows,7);

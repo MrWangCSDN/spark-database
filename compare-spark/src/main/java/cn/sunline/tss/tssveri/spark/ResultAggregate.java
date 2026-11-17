@@ -40,22 +40,31 @@ public class ResultAggregate implements Serializable {
         difference(type,key,List.of(),factory);
     }
     void difference(String type,String key,List<String> differingFields,Supplier<SampleRow> factory) {
-        switch(type) { case "2" -> onlyDestination=Math.addExact(onlyDestination,1); case "3" -> onlyOrigin=Math.addExact(onlyOrigin,1); case "4" -> different=Math.addExact(different,1); default -> throw new IllegalArgumentException("未知差异类型"); }
+        difference(type,key,differingFields,1,factory);
+    }
+    void difference(String type,String key,List<String> differingFields,long occurrences,Supplier<SampleRow> factory) {
+        if(occurrences<=0) throw new IllegalArgumentException("差异行数必须为正数");
+        switch(type) { case "2" -> onlyDestination=Math.addExact(onlyDestination,occurrences); case "3" -> onlyOrigin=Math.addExact(onlyOrigin,occurrences); case "4" -> different=Math.addExact(different,occurrences); default -> throw new IllegalArgumentException("未知差异类型"); }
         SampleRow[] cached=new SampleRow[1];
         Supplier<SampleRow> sample=()->{ if(cached[0]==null) cached[0]=factory.get();return cached[0]; };
+        PatternStats stats=null;
         if("4".equals(type)) {
             FieldPattern pattern=new FieldPattern(differingFields);
             if(retainedPatternIds==null||retainedPatternIds.contains(pattern.id)) {
-                PatternStats stats=patterns.get(pattern.id);
+                stats=patterns.get(pattern.id);
                 if(stats==null) {stats=new PatternStats(pattern);patterns.put(pattern.id,stats);}
                 else if(!stats.json.equals(pattern.json)) throw new IllegalStateException("差异字段组合标识冲突");
-                stats.count=Math.addExact(stats.count,1);
-                if(eligible(stats.samples,key,patternSampleLimit)) put(stats.samples,key,patternSampleLimit,sample.get());
-                if(patternSampleCount()>MAX_PATTERN_SAMPLES) throw new IllegalArgumentException("字段组合样本超过"+MAX_PATTERN_SAMPLES+"条，请降低样本上限");
+                stats.count=Math.addExact(stats.count,occurrences);
             }
         }
         TreeMap<String,SampleRow> target=map(type);
-        if(eligible(target,key,limit)) put(target,key,limit,sample.get());
+        int sampleCount=(int)Math.min(occurrences,Math.max(limit,patternSampleLimit));
+        for(int occurrence=0;occurrence<sampleCount;occurrence++) {
+            String sampleKey=occurrences==1?key:key+'\0'+String.format(Locale.ROOT,"%05d",occurrence);
+            if(stats!=null && eligible(stats.samples,sampleKey,patternSampleLimit)) put(stats.samples,sampleKey,patternSampleLimit,sample.get());
+            if(eligible(target,sampleKey,limit)) put(target,sampleKey,limit,sample.get());
+        }
+        if(patternSampleCount()>MAX_PATTERN_SAMPLES) throw new IllegalArgumentException("字段组合样本超过"+MAX_PATTERN_SAMPLES+"条，请降低样本上限");
     }
     ResultAggregate merge(ResultAggregate other) {
         if(limit!=other.limit||patternSampleLimit!=other.patternSampleLimit||!Objects.equals(retainedPatternIds,other.retainedPatternIds)) throw new IllegalArgumentException("样本阈值或保留组合不一致");

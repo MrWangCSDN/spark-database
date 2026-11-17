@@ -167,10 +167,10 @@ public class SparkHandlerTable {
             JavaRDD<Row> rowJavaRDDOld = readSide(sc, readPlan.oldSide);
             JavaRDD<Row> rowJavaRDDNew = readSide(sc, readPlan.newSide);
             //转换为pairRDD
-            JavaPairRDD<String, String[]> pairsOra = RddToPair(FIELD_OLD_INDEX,rowJavaRDDOld,bcField);
-            JavaPairRDD<String, String[]> pairsYjj = RddToPair(FIELD_NEW_INDEX,rowJavaRDDNew,bcField);
+            JavaPairRDD<String, CountedRow> pairsOra = RddToPair(FIELD_OLD_INDEX,rowJavaRDDOld,bcField);
+            JavaPairRDD<String, CountedRow> pairsYjj = RddToPair(FIELD_NEW_INDEX,rowJavaRDDNew,bcField);
             //采用cogroup进行join
-            JavaPairRDD<String, Tuple2<Iterable<String[]>, Iterable<String[]>>> rsCogroup = pairsOra.cogroup(pairsYjj);
+            JavaPairRDD<String, Tuple2<Iterable<CountedRow>, Iterable<CountedRow>>> rsCogroup = pairsOra.cogroup(pairsYjj);
 
             ResultAggregate result=runTwoPass(rsCogroup,limit,tuple -> {
                     Class.forName(args[tssDataSourceDriver]);
@@ -188,19 +188,19 @@ public class SparkHandlerTable {
         } catch(Exception error) {
             try(Connection c=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
                 PreparedStatement ps=c.prepareStatement("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='4',TASK_RESULT='3',FTASK_REASON=?,END_DATETIME=? WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=? AND BCOMP_TIME_NODE=? AND TASK_STATE='2'")) {
-                ps.setString(1,"核对失败（"+error.getClass().getSimpleName()+"），请检查Spark日志；重复或空核对键不允许发布每日结果");
+                ps.setString(1,"核对失败（"+error.getClass().getSimpleName()+"），请检查Spark日志");
                 ps.setString(2,getDateTime());ps.setLong(3,Long.parseLong(args[bcompIndex]));ps.setString(4,args[taskBusiDate]);ps.setString(5,args[taskBusiBatch]);ps.setString(6,args[bcompTimeNode]);ps.executeUpdate();
             } catch(Exception updateError) { error.addSuppressed(updateError); }
             throw error;
         } finally { sc.close(); }
     }
 
-    static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,
+    static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups,
             List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap,int limit) {
         return comparePartition(groups,fields,ignoreData,enumMap,limit,null,limit);
     }
 
-    static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,
+    static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups,
             List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap,int limit,
             Set<String> retainedPatternIds,int patternSampleLimit) {
         ResultAggregate result=new ResultAggregate(limit,retainedPatternIds,patternSampleLimit);
@@ -208,14 +208,19 @@ public class SparkHandlerTable {
         List<String> labels=fields.stream().map(row -> (String)row.getAs("FIELD_MEMO")).collect(Collectors.toList());
         while(groups.hasNext()) {
             var compared=compareGroup(groups.next(),fields,ignoreData,enumMap);
-            if(compared.type==null) result.matched=Math.addExact(result.matched,1);
-            else result.difference(compared.type,compared.key,compared.differingFields,
-                ()->SampleRow.of(compared.key,compared.type,names,labels,compared.origin,compared.destination,compared.differingFields));
+            result.matched=Math.addExact(result.matched,compared.matched);
+            if(compared.type!=null) {
+                CountedRow displayed=compared.origin==null?compared.destination:compared.origin;
+                result.difference(compared.type,compared.key,compared.differingFields,compared.differences,
+                    ()->SampleRow.of(displayed.businessKey,compared.type,names,labels,
+                        compared.origin==null?null:compared.origin.values,
+                        compared.destination==null?null:compared.destination.values,compared.differingFields));
+            }
         }
         return result;
     }
 
-    static PatternCounts countPatternsPartition(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,
+    static PatternCounts countPatternsPartition(Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups,
             List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap) {
         var result=new PatternCounts();
         while(groups.hasNext()) {
@@ -225,27 +230,37 @@ public class SparkHandlerTable {
         return result;
     }
 
-    private static ComparedGroup compareGroup(Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>> group,
+    private static ComparedGroup compareGroup(Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>> group,
             List<Row> fields,Map<Integer,Set<String>> ignoreData,HashMap<Integer,HashMap<String,String>> enumMap) {
-        String[] origin=uniqueRecord(group._2()._1()),destination=uniqueRecord(group._2()._2());
+        CountedRow origin=uniqueRecord(group._2()._1()),destination=uniqueRecord(group._2()._2());
+        CountedRow present=origin==null?destination:origin;
+        if(present.multiset) {
+            long originCount=origin==null?0:origin.count;
+            long destinationCount=destination==null?0:destination.count;
+            String type=originCount>destinationCount?"3":destinationCount>originCount?"2":null;
+            CountedRow remainingOrigin=originCount>destinationCount?origin:null;
+            CountedRow remainingDestination=destinationCount>originCount?destination:null;
+            return new ComparedGroup(group._1(),type,List.of(),remainingOrigin,remainingDestination,
+                Math.min(originCount,destinationCount),Math.abs(originCount-destinationCount));
+        }
         ArrayList<String> differingFields=new ArrayList<>();
-        String type=origin==null?"2":destination==null?"3":compareRows(fields,ignoreData,enumMap,origin,destination,differingFields)?"4":null;
-        return new ComparedGroup(group._1(),type,differingFields,origin,destination);
+        String type=origin==null?"2":destination==null?"3":compareRows(fields,ignoreData,enumMap,origin.values,destination.values,differingFields)?"4":null;
+        return new ComparedGroup(group._1(),type,differingFields,origin,destination,type==null?1:0,type==null?0:1);
     }
 
-    private record ComparedGroup(String key,String type,List<String> differingFields,String[] origin,String[] destination) implements Serializable {}
+    private record ComparedGroup(String key,String type,List<String> differingFields,CountedRow origin,CountedRow destination,long matched,long differences) implements Serializable {}
 
     @FunctionalInterface
     interface CountPartition extends Serializable {
-        PatternCounts apply(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups) throws Exception;
+        PatternCounts apply(Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups) throws Exception;
     }
 
     @FunctionalInterface
     interface SamplePartition extends Serializable {
-        ResultAggregate apply(Iterator<Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>>> groups,PatternCounts.Selection selection) throws Exception;
+        ResultAggregate apply(Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups,PatternCounts.Selection selection) throws Exception;
     }
 
-    static ResultAggregate runTwoPass(JavaPairRDD<String,Tuple2<Iterable<String[]>,Iterable<String[]>>> groups,int detailLimit,
+    static ResultAggregate runTwoPass(JavaPairRDD<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>> groups,int detailLimit,
             CountPartition countPartition,SamplePartition samplePartition) {
         groups.persist(org.apache.spark.storage.StorageLevel.MEMORY_AND_DISK_SER());
         try {
@@ -261,10 +276,10 @@ public class SparkHandlerTable {
         }
     }
 
-    private static String[] uniqueRecord(Iterable<String[]> values) {
-        Iterator<String[]> iterator=values.iterator();
+    private static CountedRow uniqueRecord(Iterable<CountedRow> values) {
+        Iterator<CountedRow> iterator=values.iterator();
         if(!iterator.hasNext()) return null;
-        String[] first=iterator.next();
+        CountedRow first=iterator.next();
         if(iterator.hasNext()) throw new IllegalArgumentException("SQL结果出现重复核对主键，无法按唯一主键统计差异");
         return first;
     }
@@ -740,10 +755,11 @@ public class SparkHandlerTable {
     }
 
     /** Map each complete primary key to configured field values. */
-    private static JavaPairRDD<String, String[]> RddToPair(String type,JavaRDD<Row> rowJavaRDD, Broadcast<List<Row>> bcField){
-        JavaPairRDD<String, String[]> javaPairRDD = rowJavaRDD.mapToPair(line -> {
+    static JavaPairRDD<String, CountedRow> RddToPair(String type,JavaRDD<Row> rowJavaRDD, Broadcast<List<Row>> bcField){
+        JavaPairRDD<String, CountedRow> javaPairRDD = rowJavaRDD.mapToPair(line -> {
             ArrayList<String> keyList= new ArrayList<>();
             ArrayList<String> valueList= new ArrayList<>();
+            boolean multiset=false;
 
             for (Row tssBcompFieldDataRow : bcField.value()) {
                 int fieldIndex = ((Number)tssBcompFieldDataRow.getAs(type)).intValue();
@@ -753,8 +769,9 @@ public class SparkHandlerTable {
                 String value=raw==null?null:raw.toString();
                 valueList.add(value);
                 if("1".equals(indexFlag)) {
-                    if(value==null||value.trim().isEmpty()) throw new IllegalArgumentException("SQL结果出现空核对主键");
-                    keyList.add(SampleRow.keyValue(value,fieldType));
+                    String keyValue=SampleRow.keyValue(value,fieldType);
+                    keyList.add(keyValue);
+                    multiset|=keyValue==null||keyValue.isEmpty();
                 }
             }
 
@@ -763,11 +780,18 @@ public class SparkHandlerTable {
             if(key.length()>1000) throw new IllegalArgumentException("核对主键超过1000字符");
             String[] values = valueList.toArray(new String[0]);
 
-            return new Tuple2<>(key, values);
+            String groupKey=key;
+            if(multiset) {
+                var identity=new ArrayList<String>(valueList.size()+1);
+                identity.add(key);
+                identity.addAll(valueList);
+                groupKey='\0'+SampleRow.key(identity);
+            }
+            return new Tuple2<>(groupKey, new CountedRow(key,values,multiset));
 
         });
 
-        return javaPairRDD;
+        return javaPairRDD.reduceByKey(CountedRow::merge);
     }
 
     /**

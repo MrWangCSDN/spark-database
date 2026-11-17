@@ -13,7 +13,11 @@ class ComparisonSummaryTest {
         StructType schema=new StructType().add("FIELD_NAME",DataTypes.StringType).add("FIELD_MEMO",DataTypes.StringType).add("FIELD_TYPE",DataTypes.StringType).add("FIELD_IGNORE_FLAG",DataTypes.StringType).add("FIELD_IGNORE_VALUE",DataTypes.StringType).add("FIELD_ENUM_INDEX",DataTypes.IntegerType);
         return new GenericRowWithSchema(new Object[]{name,name+"中文",type,"0",ignore,null},schema);
     }
-    private static Tuple2<String,Tuple2<Iterable<String[]>,Iterable<String[]>>> group(String key,List<String[]> a,List<String[]> b) {return new Tuple2<>(key,new Tuple2<>(a,b));}
+    private static Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>> group(String key,List<String[]> a,List<String[]> b) {
+        List<CountedRow> origin=a.stream().map(values->new CountedRow(key,values,false)).toList();
+        List<CountedRow> destination=b.stream().map(values->new CountedRow(key,values,false)).toList();
+        return new Tuple2<>(key,new Tuple2<>(origin,destination));
+    }
     @Test void countsDifferentRowOnceAndKeepsAllDifferentFieldsWithoutDoubleRounding() {
         var groups=List.of(group("key",Collections.singletonList(new String[]{"9007199254740992","a"}),Collections.singletonList(new String[]{"9007199254740993","b"})));
         var result=SparkHandlerTable.comparePartition(groups.iterator(),List.of(field("amount","2",null),field("name","1",null)),Map.of(),new HashMap<>(),1000);
