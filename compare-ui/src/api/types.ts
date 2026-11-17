@@ -14,7 +14,7 @@ export interface FieldRule { name: string; type: string; memo: string; oldIndex:
 export interface ConfigurationDetail { basic: BasicConfiguration; tableSql: TableSqlConfiguration; fields: FieldRule[] }
 export interface ConfigurationSaveResult { configuration: ConfigurationDetail; saved: boolean; cacheRefreshed: boolean; warning?: string | null }
 export interface ConfigScriptImportResult { saved: boolean; cacheRefreshed: boolean; configurationCount: number; fieldCount: number; tableSqlCount: number; warning?: string | null }
-export interface ConfigurationOptions { states: string[]; enums: Array<{ index: number; oldValue: string; newValue: string }>; ignoreValues: Array<{ id: number; value: string }> }
+export interface ConfigurationOptions { fieldMatchByName?: boolean; states: string[]; enums: Array<{ index: number; oldValue: string; newValue: string }>; ignoreValues: Array<{ id: number; value: string }> }
 export interface DatabaseSummary { databaseId: number; databaseName: string; url: string; user: string; driver: string; encryption: string; passwordConfigured: boolean }
 export interface DatabaseSaveRequest { databaseId: number; databaseName: string; url: string; user: string; driver: string; encryption: string; newPassword: string | null }
 export interface DatabaseConnectionTestResult { success: boolean; databaseProduct: string; databaseVersion: string; elapsedMs: number }

@@ -63,7 +63,8 @@ class SparkCompatibilityTest {
             // 由原main创建SparkSession，保证原Kryo/内存配置也参与验证。
             var properties=Map.of("spark.master","local[2]", "spark.ui.enabled","false",
                 "spark.driver.host","127.0.0.1", "spark.driver.bindAddress","127.0.0.1",
-                "spark.compare.detailLimit",Integer.toString(globalLimit), "spark.default.parallelism","2", "spark.sql.shuffle.partitions","2");
+                "spark.compare.detailLimit",Integer.toString(globalLimit), "spark.default.parallelism","2", "spark.sql.shuffle.partitions","2",
+                "spark.compare.fieldMatchByName","false");
             var previous=new HashMap<String,String>();
             properties.forEach((key,value) -> { previous.put(key,System.getProperty(key)); System.setProperty(key,value); });
             List<Integer> jdbcStagePartitions=new CopyOnWriteArrayList<>();

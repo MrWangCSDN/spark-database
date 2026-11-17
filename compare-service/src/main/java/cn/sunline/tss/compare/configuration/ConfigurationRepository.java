@@ -91,9 +91,12 @@ public class ConfigurationRepository {
     private void insertFields(long index,List<FieldRule> fields){for(FieldRule f:fields)jdbc.update("INSERT INTO TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_MEMO,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_ENUM_FLAG,FIELD_ENUM_INDEX,FIELD_PARTITION_FLAG,FIELD_IGNORE_VALUE,FIELD_IGNORE_FLAG) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",index,f.name(),f.type(),f.memo(),f.oldIndex(),f.newIndex(),f.indexFlag(),f.enumFlag(),f.enumIndex(),"0",f.ignoreValue(),f.ignoreFlag());}
 
     ConfigurationOptions options(){
+        return options(false);
+    }
+    ConfigurationOptions options(boolean fieldMatchByName){
         List<String> states=jdbc.query("SELECT DISTINCT BCOMP_STATE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_STATE IS NOT NULL ORDER BY BCOMP_STATE",(rs,n)->rs.getString(1));
         List<ConfigurationOptions.EnumOption> enums=jdbc.query("SELECT CONV_ENUM_INDEX,ORIG_ENUM_VALUE,DEST_ENUM_VALUE FROM TSS_BCOMP_ENUM_NEW ORDER BY CONV_ENUM_INDEX,ORIG_ENUM_VALUE",(rs,n)->new ConfigurationOptions.EnumOption(rs.getLong(1),rs.getString(2),rs.getString(3)));
         List<ConfigurationOptions.IgnoreOption> ignores=jdbc.query("SELECT IGNORE_ID,IGNORE_VALUE FROM TSS_IGNORE_VALUE_NEW ORDER BY IGNORE_ID,IGNORE_VALUE",(rs,n)->new ConfigurationOptions.IgnoreOption(rs.getLong(1),rs.getString(2)));
-        return new ConfigurationOptions(states,enums,ignores);
+        return new ConfigurationOptions(states,enums,ignores,fieldMatchByName);
     }
 }

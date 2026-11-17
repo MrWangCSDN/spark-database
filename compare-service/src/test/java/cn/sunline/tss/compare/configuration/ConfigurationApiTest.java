@@ -41,6 +41,39 @@ class ConfigurationApiTest {
             .setControllerAdvice(new ApiExceptionHandler()).build();
     }
 
+    MockMvc mvcByName(){
+        return MockMvcBuilders.standaloneSetup(new ConfigurationController(new ConfigurationService(repository,()->{},52_428_800L,true)))
+            .setControllerAdvice(new ApiExceptionHandler()).build();
+    }
+
+    @Test void nameModeReportsOptionsAndAcceptsLegacyPositions() throws Exception {
+        var mvc=mvcByName();
+        mvc.perform(get("/api/configuration-options")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.fieldMatchByName").value(true));
+        String fields=valid(22,"名称映射").replace("\"oldIndex\":1", "\"oldIndex\":37")
+            .replace("]}",",{\"name\":\"AMOUNT\",\"type\":\"2\",\"oldIndex\":37,\"newIndex\":0,\"indexFlag\":\"0\"}]}");
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(fields))
+            .andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT FIELD_OLD_INDEX FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=22 AND FIELD_NAME='ID'",Long.class)).isEqualTo(37);
+        jdbc.update("UPDATE TSS_BCOMP_FIELD_NEW SET FIELD_OLD_INDEX=NULL,FIELD_NEW_INDEX=NULL WHERE BCOMP_INDEX=22");
+        mvc.perform(get("/api/configurations/22")).andExpect(status().isOk());
+        mvc(() -> {}).perform(get("/api/configuration-options")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.fieldMatchByName").value(false));
+    }
+
+    @Test void nameModeRejectsCaseInsensitiveDuplicateFieldNames() throws Exception {
+        String fields=valid(22,"重名").replace("]}",",{\"name\":\" id \",\"type\":\"1\",\"oldIndex\":2,\"newIndex\":2,\"indexFlag\":\"0\"}]}");
+        mvcByName().perform(post("/api/configurations").contentType(APPLICATION_JSON).content(fields))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("DUPLICATE_FIELD_NAME"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Integer.class)).isZero();
+    }
+
+    @Test void positionModeStillRequiresPositivePositions() throws Exception {
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
+                .content(valid(22,"位置映射").replace("\"oldIndex\":1","\"oldIndex\":0")))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_FIELD"));
+    }
+
     String valid(long index,String name){return """
         {"basic":{"bcompIndex":%d,"name":"%s","module":"ACCOUNT","memo":"日终","range":"ALL","timeNode":"EOD","state":"1","partitionNum":16,"dateMode":"2"},
          "tableSql":{"origDatabaseId":1,"destDatabaseId":2,"origSql":"OLD_SQL","destSql":"NEW_SQL"},

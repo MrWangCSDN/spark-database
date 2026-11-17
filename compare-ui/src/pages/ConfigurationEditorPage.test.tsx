@@ -2,6 +2,47 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ConfigurationEditorPage } from './ConfigurationEditorPage'
 import { renderPage } from '../test/render'
+import { http, HttpResponse } from 'msw'
+import { server } from '../test/server'
+
+const nameModeConfiguration = {
+  basic: { bcompIndex: 8, name: '客户余额核对', module: '', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 1, dateMode: '1' },
+  tableSql: { origDatabaseId: 1, destDatabaseId: 2, origSql: 'select ID, AMOUNT from old_customer', destSql: 'select AMOUNT, ID from new_customer' },
+  fields: [
+    { name: 'ID', type: '1', oldIndex: 37, newIndex: 0, indexFlag: '1' },
+    { name: 'AMOUNT', type: '2', oldIndex: 37, newIndex: 0, indexFlag: '0' }
+  ]
+}
+
+function nameModeResponses() {
+  server.use(
+    http.get('/api/configuration-options', () => HttpResponse.json({ states: ['1'], enums: [], ignoreValues: [], fieldMatchByName: true })),
+    http.get('/api/configurations/8', () => HttpResponse.json(nameModeConfiguration))
+  )
+}
+
+test('name mode hides positions and saves configuration with legacy positions', async () => {
+  nameModeResponses()
+  const user = userEvent.setup()
+  renderPage(<ConfigurationEditorPage />, '/configurations/8')
+  expect(await screen.findByText('按字段英文名匹配两侧 SQL 返回列名或 AS 别名，不区分大小写。')).toBeVisible()
+  expect(await screen.findByDisplayValue('AMOUNT')).toBeVisible()
+  expect(screen.queryByLabelText(/字段位置/)).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '保存配置' }))
+  expect(await screen.findByText('配置已保存，但缓存刷新失败')).toBeVisible()
+})
+
+test('name mode rejects field names differing only in case', async () => {
+  nameModeResponses()
+  const user = userEvent.setup()
+  renderPage(<ConfigurationEditorPage />, '/configurations/8')
+  await screen.findByText('按字段英文名匹配两侧 SQL 返回列名或 AS 别名，不区分大小写。')
+  const field = await screen.findByDisplayValue('AMOUNT')
+  await user.clear(field)
+  await user.type(field, 'id')
+  await user.click(screen.getByRole('button', { name: '保存配置' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('字段英文名必须唯一（不区分大小写）')
+})
 
 test('shows cache refresh warning after configuration is saved', async () => {
   const user = userEvent.setup()

@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 @Service
@@ -21,9 +22,11 @@ public class ConfigurationService {
     private final ConfigurationRepository repository;
     private final CacheReloader cache;
     private final long maxImportBytes;
+    private final boolean fieldMatchByName;
     private final AxonConfigScriptParser scriptParser=new AxonConfigScriptParser();
     public ConfigurationService(ConfigurationRepository repository,CacheReloader cache){this(repository,cache,52_428_800L);}
-    @Autowired public ConfigurationService(ConfigurationRepository repository,CacheReloader cache,@Value("${compare.config-import-max-bytes:52428800}")long maxImportBytes){this.repository=repository;this.cache=cache;this.maxImportBytes=maxImportBytes;}
+    public ConfigurationService(ConfigurationRepository repository,CacheReloader cache,long maxImportBytes){this(repository,cache,maxImportBytes,false);}
+    @Autowired public ConfigurationService(ConfigurationRepository repository,CacheReloader cache,@Value("${compare.config-import-max-bytes:52428800}")long maxImportBytes,@Value("${compare.field-match-by-name:true}")boolean fieldMatchByName){this.repository=repository;this.cache=cache;this.maxImportBytes=maxImportBytes;this.fieldMatchByName=fieldMatchByName;}
 
     public PageResult<BasicConfiguration> list(int page,int size){if(page<0||size<1||size>100)throw ApiException.badRequest("INVALID_PAGE","分页参数不合法");return repository.list(page,size);}
     public ConfigurationDetail find(long index){var value=repository.find(index);if(value==null)throw ApiException.notFound("CONFIGURATION_NOT_FOUND","核对配置不存在");return value;}
@@ -58,7 +61,7 @@ public class ConfigurationService {
         var command=new ConfigurationCommand(new BasicConfiguration(request.newIndex(),request.newName().trim(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),b.partitionNum(),b.dateMode()),source.tableSql(),source.fields());
         return create(command);
     }
-    public ConfigurationOptions options(){return repository.options();}
+    public ConfigurationOptions options(){return repository.options(fieldMatchByName);}
 
     public ConfigScriptImportResult importScript(MultipartFile file){
         return cn.sunline.tss.compare.ControlPlaneLock.call(() -> importScriptLocked(file));
@@ -85,9 +88,15 @@ public class ConfigurationService {
         BasicConfiguration b=command.basic();TableSqlConfiguration s=command.tableSql();
         if(b.bcompIndex()<=0||blank(b.name())||blank(b.state())||!("1".equals(b.dateMode())||"2".equals(b.dateMode()))||blank(s.origSql())||blank(s.destSql())||!repository.databasesExist(s.origDatabaseId(),s.destDatabaseId()))throw ApiException.badRequest("INVALID_CONFIGURATION","核对基本信息、SQL或数据库引用不完整");
         Set<Long> oldIndexes=new HashSet<>(),newIndexes=new HashSet<>();int keys=0;
+        Set<String> names=new HashSet<>();
         for(FieldRule f:command.fields()){
-            if(f==null||blank(f.name())||!TYPES.contains(f.type())||f.oldIndex()<=0||f.newIndex()<=0)throw ApiException.badRequest("INVALID_FIELD","字段名称、类型和位置不合法");
-            if(!oldIndexes.add(f.oldIndex())||!newIndexes.add(f.newIndex()))throw ApiException.badRequest("DUPLICATE_FIELD_POSITION","两侧字段位置必须各自唯一");
+            if(f==null||blank(f.name())||f.type()==null||!TYPES.contains(f.type()))throw ApiException.badRequest("INVALID_FIELD","字段名称或类型不合法");
+            if(fieldMatchByName) {
+                if(!names.add(f.name().trim().toLowerCase(Locale.ROOT)))throw ApiException.badRequest("DUPLICATE_FIELD_NAME","字段英文名必须唯一（不区分大小写）");
+            } else {
+                if(f.oldIndex()<=0||f.newIndex()<=0)throw ApiException.badRequest("INVALID_FIELD","两侧字段位置必须为正整数");
+                if(!oldIndexes.add(f.oldIndex())||!newIndexes.add(f.newIndex()))throw ApiException.badRequest("DUPLICATE_FIELD_POSITION","两侧字段位置必须各自唯一");
+            }
             if("1".equals(f.indexFlag()))keys++;
         }
         if(keys==0)throw ApiException.badRequest("BUSINESS_KEY_REQUIRED","至少配置一个业务键字段");

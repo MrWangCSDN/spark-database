@@ -28,6 +28,8 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 本源码 ZIP 不含前端源码；若需重新编译前端，请使用完整工程。Node 下载地址由 `frontend-maven-plugin` 使用。内网不能访问默认地址时，需要在企业制品库镜像 Node 官方目录，并提供插件对应的 `nodeDownloadRoot` 配置。
 
+字段映射默认使用名称模式，配置 `FIELD_NAME` 与两侧 SQL 返回列名或 `AS` 别名按大小写不敏感方式匹配。SQL 列顺序可以不同，配置英文名必须唯一，缺列或返回重名列时任务失败；此模式忽略历史位置值。需要历史位置映射时，在部署 `config/bd.env` 中显式设置 `BD_FIELD_MATCH_BY_NAME=false`，两侧位置须为正整数且各自唯一。开关对应 `compare.field-match-by-name=${BD_FIELD_MATCH_BY_NAME:true}`。升级时同步部署匹配版本的服务、Spark 作业 JAR 和随服务打包的前端。
+
 ## 构建与验收
 
 唯一索引空键支持通过新版 Spark 作业生效。重新构建并部署服务与 Spark 发布物后，按原核对配置重跑业务日期，核对 NULL、空串、重复次数及两侧独有统计。含空键行按 SQL 返回的原始整行值计次，部署验收时使用两侧业务约定的金额、日期等输出格式。样本中的业务键保留 NULL，重复行按照样本限额保存。

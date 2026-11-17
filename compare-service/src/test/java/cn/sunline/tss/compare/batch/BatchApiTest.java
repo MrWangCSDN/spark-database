@@ -41,6 +41,10 @@ class BatchApiTest {
 
     @BeforeEach
     void setup() {
+        setup(false);
+    }
+
+    private void setup(boolean fieldMatchByName) {
         var source = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         new ResourceDatabasePopulator(new FileSystemResource("../sql/create_bcomp_new.sql")).execute(source);
         jdbc = new JdbcTemplate(source);
@@ -49,11 +53,24 @@ class BatchApiTest {
             @Override public void submit(String[] args) { }
             @Override public void cancelBatch(String batchId) { cancelledBatch.set(batchId); }
         };
-        var service = new BatchService(new BatchRepository(source, 30), cache, new MockEnvironment(), launcher);
+        var service = new BatchService(new BatchRepository(source, 30), cache, new MockEnvironment(), launcher, fieldMatchByName);
         var configurationService = new ConfigurationService(new ConfigurationRepository(source, 30), cache);
         mvc = MockMvcBuilders.standaloneSetup(new BatchController(service), new ConfigurationController(configurationService))
             .setControllerAdvice(new ApiExceptionHandler()).build();
         jdbc.update("INSERT INTO TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME,DATABASE_URL,DATABASE_USER,DATABASE_PASSWORD,DATABASE_DRIVER,DATABASE_ENCRYPTION) VALUES(1,'源库','jdbc:opengauss://source/db?currentSchema=business','u','secret','org.opengauss.Driver','0'),(2,'目标库','jdbc:opengauss://dest/db?currentSchema=business','u','secret','org.opengauss.Driver','0')");
+    }
+
+    @Test
+    void nameModePreviewIgnoresLegacyPositionsAndRejectsDuplicateNames() throws Exception {
+        setup(true);
+        configurations(1);
+        jdbc.update("UPDATE TSS_BCOMP_FIELD_NEW SET FIELD_OLD_INDEX=NULL,FIELD_NEW_INDEX=37 WHERE BCOMP_INDEX=1");
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG) VALUES(1,'amount','2',0,37,'0')");
+        assertThat(preview(request("ALL")).path("readyCount").asInt()).isEqualTo(1);
+        jdbc.update("UPDATE TSS_BCOMP_FIELD_NEW SET FIELD_NAME='ID' WHERE FIELD_NAME='amount'");
+        var invalid=preview(request("ALL"));
+        assertThat(invalid.path("blockedCount").asInt()).isEqualTo(1);
+        assertThat(invalid.path("items").get(0).path("issueCode").asText()).isEqualTo("DUPLICATE_FIELD_NAME");
     }
 
     @Test

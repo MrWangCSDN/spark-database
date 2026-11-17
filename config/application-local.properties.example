@@ -60,3 +60,6 @@ server.port=${SERVER_PORT:8899}
 # Metadata control-plane dialect: GAUSSDB (default) or GDB.
 bd.metadata-db-type=${BD_METADATA_DB_TYPE:GAUSSDB}
 spark.gdb.jdbc-url-prefixes=${SPARK_GDB_JDBC_URL_PREFIXES:jdbc:mysql:,jdbc:gdb:,jdbc:gbase:}
+
+# 按配置字段英文名匹配 SQL 返回列名或别名，false 使用历史位置映射。
+compare.field-match-by-name=${BD_FIELD_MATCH_BY_NAME:true}

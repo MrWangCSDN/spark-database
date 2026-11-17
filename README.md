@@ -57,6 +57,8 @@ target/tss-compare-1.0.0-SNAPSHOT.tar.gz
 
 Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spark 模块的 provided Jackson 使用 2.15.2，与 Spark 3.5.3 的 Scala Jackson 模块匹配，避免继承 Boot Jackson 版本造成运行冲突。
 
+字段映射默认按配置 `FIELD_NAME` 与两侧 SQL 返回列名或 `AS` 别名匹配，不区分大小写。两侧 SQL 可使用不同列顺序，例如 `source_column AS FIELD_NAME`；配置字段英文名必须唯一，SQL 缺少对应列或返回重名列时任务失败。旧 `FIELD_OLD_INDEX`、`FIELD_NEW_INDEX` 继续保留，名称模式忽略其位置值。部署属性 `compare.field-match-by-name=${BD_FIELD_MATCH_BY_NAME:true}` 控制此行为；显式设置 `BD_FIELD_MATCH_BY_NAME=false` 可使用历史位置映射，位置必须为正整数且两侧各自唯一。升级时同时部署匹配版本的服务与 Spark 作业 JAR，并使用本次构建中集成的前端。
+
 ## 管理台
 
 服务根路径打开管理台，提供运行总览、任务创建与分页查询、任务详情和差异分页、核对配置创建/编辑/复制、数据库连接创建/编辑，以及 light/dark/system 主题。列表默认每页20条，最多100条；页面仅管理 `BCOMP_TYPE='2'`。

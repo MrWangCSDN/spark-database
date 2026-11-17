@@ -11,6 +11,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -35,13 +37,21 @@ public class BatchService {
     private final CacheReloader cache;
     private final Environment environment;
     private final JobLauncher launcher;
+    private final boolean fieldMatchByName;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public BatchService(BatchRepository repository, CacheReloader cache, Environment environment, JobLauncher launcher) {
+        this(repository,cache,environment,launcher,false);
+    }
+
+    @Autowired
+    public BatchService(BatchRepository repository, CacheReloader cache, Environment environment, JobLauncher launcher,
+            @Value("${compare.field-match-by-name:true}") boolean fieldMatchByName) {
         this.repository = repository;
         this.cache = cache;
         this.environment = environment;
         this.launcher = launcher;
+        this.fieldMatchByName = fieldMatchByName;
     }
 
     public BatchPreview preview(BatchRequest request) {
@@ -198,13 +208,22 @@ public class BatchService {
         }
         var oldPositions = new HashSet<Long>();
         var newPositions = new HashSet<Long>();
+        var names = new HashSet<String>();
         int keys = 0;
         for (var field : configuration.fields()) {
-            long oldPosition = positiveNumber(field.get("FIELD_OLD_INDEX"));
-            long newPosition = positiveNumber(field.get("FIELD_NEW_INDEX"));
-            if (blank(field.get("FIELD_NAME")) || !FIELD_TYPES.contains(valueOrEmpty(field.get("FIELD_TYPE")))
-                || oldPosition <= 0 || newPosition <= 0 || !oldPositions.add(oldPosition) || !newPositions.add(newPosition)) {
-                return new Issue("INVALID_FIELD", "字段名称、类型或位置不合法，两侧字段位置必须各自唯一");
+            if (blank(field.get("FIELD_NAME")) || !FIELD_TYPES.contains(valueOrEmpty(field.get("FIELD_TYPE")))) {
+                return new Issue("INVALID_FIELD", "字段名称或类型不合法");
+            }
+            if (fieldMatchByName) {
+                if (!names.add(field.get("FIELD_NAME").toString().trim().toLowerCase(Locale.ROOT))) {
+                    return new Issue("DUPLICATE_FIELD_NAME", "字段英文名必须唯一（不区分大小写）");
+                }
+            } else {
+                long oldPosition = positiveNumber(field.get("FIELD_OLD_INDEX"));
+                long newPosition = positiveNumber(field.get("FIELD_NEW_INDEX"));
+                if (oldPosition <= 0 || newPosition <= 0 || !oldPositions.add(oldPosition) || !newPositions.add(newPosition)) {
+                    return new Issue("INVALID_FIELD", "两侧字段位置必须为正整数且各自唯一");
+                }
             }
             if ("1".equals(field.get("FIELD_INDEX_FLAG"))) keys++;
         }

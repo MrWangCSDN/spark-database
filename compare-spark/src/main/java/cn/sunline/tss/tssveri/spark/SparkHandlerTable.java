@@ -132,6 +132,18 @@ public class SparkHandlerTable {
                 log.info("SQL占位符替换完成，核对日期: {}", sqlDateParam);
             }
 
+            boolean matchByName=Boolean.parseBoolean(sc.conf().get("spark.compare.fieldMatchByName","true"));
+            Class.forName(args[OLD_DRIVER_INDEX]);
+            try(Connection connection=DriverManager.getConnection(args[OLD_URL_INDEX],args[OLD_USER_INDEX],args[OLD_PASSWORD_INDEX])) {
+                tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[OLD_TABLE_INDEX],tssBcompFieldDataRows,
+                    FIELD_OLD_INDEX,"数据库A（源）",matchByName);
+            }
+            Class.forName(args[NEW_DRIVER_INDEX]);
+            try(Connection connection=DriverManager.getConnection(args[NEW_URL_INDEX],args[NEW_USER_INDEX],args[NEW_PASSWORD_INDEX])) {
+                tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[NEW_TABLE_INDEX],tssBcompFieldDataRows,
+                    FIELD_NEW_INDEX,"数据库B（目标）",matchByName);
+            }
+
             //先校验两侧业务键，避免无效配置触发大表计数。
             PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_OLD_INDEX);
             PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_NEW_INDEX);
@@ -188,7 +200,9 @@ public class SparkHandlerTable {
         } catch(Exception error) {
             try(Connection c=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
                 PreparedStatement ps=c.prepareStatement("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='4',TASK_RESULT='3',FTASK_REASON=?,END_DATETIME=? WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=? AND BCOMP_TIME_NODE=? AND TASK_STATE='2'")) {
-                ps.setString(1,"核对失败（"+error.getClass().getSimpleName()+"），请检查Spark日志");
+                String reason=error instanceof QueryFieldResolver.FieldResolutionException
+                    ?error.getMessage():"核对失败（"+error.getClass().getSimpleName()+"），请检查Spark日志";
+                ps.setString(1,reason);
                 ps.setString(2,getDateTime());ps.setLong(3,Long.parseLong(args[bcompIndex]));ps.setString(4,args[taskBusiDate]);ps.setString(5,args[taskBusiBatch]);ps.setString(6,args[bcompTimeNode]);ps.executeUpdate();
             } catch(Exception updateError) { error.addSuppressed(updateError); }
             throw error;
@@ -338,7 +352,7 @@ public class SparkHandlerTable {
     private static List<Row> getTssBcompFieldData(SparkSession sc, String[] args) throws Exception {
 
         //回放数据库信息
-        String tssbcompfieldSql = "(select * from tss_bcomp_field_new where bcomp_index = ? order by FIELD_OLD_INDEX)  tss_bcomp_field_new"  ;
+        String tssbcompfieldSql = "(select * from tss_bcomp_field_new where bcomp_index = ? order by FIELD_OLD_INDEX, FIELD_NEW_INDEX, FIELD_NAME)  tss_bcomp_field_new"  ;
         String finalSql = tssbcompfieldSql.replaceFirst("\\?", String.valueOf(args[bcompIndex]));
 
         Map<String, String> tssDataSouceProperties = buildJdbcConfig(args[tssDataSourceUrl], args[tssDataSourceUser], args[tssDataSourcePassword], args[tssDataSourceDriver], finalSql);
