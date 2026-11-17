@@ -5,6 +5,11 @@ import cn.sunline.tss.compare.api.ApiException;
 import java.io.IOException;
 import java.io.PushbackReader;
 import java.io.Reader;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
@@ -13,6 +18,7 @@ import java.util.regex.Pattern;
 
 final class AxonConfigScriptParser {
     private static final Pattern INSERT = Pattern.compile("(?is)^INSERT\\s+INTO\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*VALUES\\s*(.+)$");
+    private static final Pattern UTF8_HEX_VALUE = Pattern.compile("(?i)CONVERT\\s*\\(\\s*0x([0-9a-f]+)\\s+USING\\s+utf8mb4\\s*\\)");
     private static final List<String> CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state");
     private static final List<String> HASH_CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state","bcomp_partition_num","bcomp_shard_strategy");
     private static final List<String> SAMPLE_CONF_COLUMNS = java.util.stream.Stream.concat(HASH_CONF_COLUMNS.stream(), java.util.stream.Stream.of("bcomp_sample_limit")).toList();
@@ -116,19 +122,23 @@ final class AxonConfigScriptParser {
         state.phase = phase;
         boolean hashConfiguration = phase == 0 && columns.size() >= HASH_CONF_COLUMNS.size();
         boolean reviserConfiguration = phase == 0 && columns.equals(REVISER_CONF_COLUMNS);
-        int rows = countLiteralRows(matcher.group(3), expected.size(), hashConfiguration, reviserConfiguration);
+        ParsedValues values = parseLiteralRows(matcher.group(3), expected.size(), hashConfiguration, reviserConfiguration, phase == 2);
+        int rows = values.rows();
         state.hasHashConfigurations |= hashConfiguration;
         if (phase == 0) state.confRows += rows;
         else if (phase == 1) state.fieldRows += rows;
         else state.sqlRows += rows;
-        executor.accept(Command.insert(statement));
+        executor.accept(Command.insert(statement.substring(0, matcher.start(3)) + values.sql(), values.parameters()));
     }
 
-    private int countLiteralRows(String values, int columnCount, boolean hashConfiguration, boolean reviserConfiguration) {
-        int position=0, rows=0;
+    private ParsedValues parseLiteralRows(String values, int columnCount, boolean hashConfiguration,
+                                          boolean reviserConfiguration, boolean tableSql) {
+        int position=0, rows=0, copiedThrough=0;
+        StringBuilder sql=new StringBuilder(values.length());
+        List<String> parameters=new ArrayList<>();
         while (true) {
             position=skip(values,position);
-            if (position>=values.length()) return rows;
+            if (position>=values.length()) break;
             if (values.charAt(position++)!='(') invalid();
             int columns=0;
             while (true) {
@@ -136,7 +146,18 @@ final class AxonConfigScriptParser {
                 if (position>=values.length()) invalid();
                 int tokenStart = position;
                 char c=values.charAt(position);
-                if (c=='\'') position=stringLiteral(values,position);
+                boolean queryColumn=tableSql && (columns==1 || columns==3);
+                String queryValue=null;
+                if (c=='\'') {
+                    position=stringLiteral(values,position);
+                    if(queryColumn) queryValue=values.substring(tokenStart+1,position-1).replace("''","'");
+                }
+                else if (queryColumn && (c=='C' || c=='c')) {
+                    Matcher encoded=UTF8_HEX_VALUE.matcher(values).region(position,values.length());
+                    if(!encoded.lookingAt()) invalid();
+                    queryValue=decodeUtf8Hex(encoded.group(1));
+                    position=encoded.end();
+                }
                 else if (reviserConfiguration && columns >= SAMPLE_CONF_COLUMNS.size()) {
                     if (!values.regionMatches(true,position,"NULL",0,4)) invalid();
                     position+=4;
@@ -146,6 +167,11 @@ final class AxonConfigScriptParser {
                     if (c=='-') position++;
                     while(position<values.length() && Character.isDigit(values.charAt(position))) position++;
                     if(position==start || (c=='-' && position==start+1)) invalid();
+                }
+                if(queryValue!=null) {
+                    sql.append(values,copiedThrough,tokenStart).append('?');
+                    copiedThrough=position;
+                    parameters.add(queryValue);
                 }
                 if (hashConfiguration && columns == 8) validatePartitionCount(values.substring(tokenStart, position));
                 if (hashConfiguration && columns == 9 && !"'HASH'".equalsIgnoreCase(values.substring(tokenStart, position))) invalid();
@@ -160,8 +186,22 @@ final class AxonConfigScriptParser {
             if(columns!=columnCount) invalid();
             rows++;
             position=skip(values,position);
-            if(position>=values.length()) return rows;
+            if(position>=values.length()) break;
             if(values.charAt(position++)!=',') invalid();
+        }
+        sql.append(values,copiedThrough,values.length());
+        return new ParsedValues(rows,sql.toString(),List.copyOf(parameters));
+    }
+
+    private String decodeUtf8Hex(String hex) {
+        try {
+            String value=StandardCharsets.UTF_8.newDecoder()
+                .decode(ByteBuffer.wrap(HexFormat.of().parseHex(hex))).toString();
+            if(value.indexOf('\0')>=0) invalid();
+            return value;
+        } catch(IllegalArgumentException | CharacterCodingException exception) {
+            invalid();
+            return "";
         }
     }
 
@@ -199,9 +239,10 @@ final class AxonConfigScriptParser {
     private String stripBom(String value){return value.startsWith("\uFEFF")?value.substring(1):value;}
     private static void invalid(){throw ApiException.badRequest("INVALID_CONFIG_SCRIPT","配置脚本不符合 Axon 固定格式");}
 
-    record Command(Kind kind,String value) {
-        static Command clear(String table){return new Command(Kind.CLEAR,table);}
-        static Command insert(String sql){return new Command(Kind.INSERT,sql);}
+    private record ParsedValues(int rows,String sql,List<String> parameters) {}
+    record Command(Kind kind,String value,List<String> parameters) {
+        static Command clear(String table){return new Command(Kind.CLEAR,table,List.of());}
+        static Command insert(String sql,List<String> parameters){return new Command(Kind.INSERT,sql,parameters);}
     }
     enum Kind { CLEAR, INSERT }
     record ParseResult(long configurationCount,long fieldCount,long tableSqlCount,boolean hasHashConfigurations) {}

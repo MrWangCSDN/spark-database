@@ -12,6 +12,8 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.UUID;
+import java.util.HexFormat;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -129,6 +131,112 @@ class ConfigurationApiTest {
         return sampleScript("100")
             .replace("bcomp_sample_limit)", "bcomp_sample_limit,reviser_name,reviser_username)")
             .replace("16,'HASH',100);", "16,'HASH',100,"+name+","+username+");");
+    }
+
+    String scriptWithSqlExpressions(String origin, String destination) {
+        return reviserScript("'张三'", "'c-zhangsan'")
+            .replace("'(select ID,UPDATED_AT from T where NOTE=''a;b'') orig'", origin)
+            .replace("'(select ID,UPDATED_AT from T where NOTE=''a;b'') dest'", destination);
+    }
+
+    String utf8SqlExpression(String sql) {
+        return "CONVERT(0x"+HexFormat.of().formatHex(sql.getBytes(StandardCharsets.UTF_8))+" USING utf8mb4)";
+    }
+
+    @Test void importsAxonUtf8HexSqlWithoutChangingItsContents() throws Exception {
+        String originSql="(select ID,UPDATED_AT from T where NOTE='中文😀\\路径\\\\连续;--/*''引号*/?'\n and TAG='源' and MARK='\\n\\t\\r\\0') orig";
+        String destinationSql="(select ID,UPDATED_AT from U where NOTE='目标\\\\目录\\文件;/*--''内容*/?'\n and TAG='目标😀') dest";
+        AtomicInteger reloads=new AtomicInteger();
+        var mvc=mvc(reloads::incrementAndGet);
+
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(
+                scriptWithSqlExpressions(utf8SqlExpression(originSql),utf8SqlExpression(destinationSql)))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.saved").value(true))
+            .andExpect(jsonPath("$.cacheRefreshed").value(true))
+            .andExpect(jsonPath("$.configurationCount").value(1))
+            .andExpect(jsonPath("$.fieldCount").value(2))
+            .andExpect(jsonPath("$.tableSqlCount").value(1));
+
+        assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo(originSql);
+        assertThat(jdbc.queryForObject("SELECT DEST_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo(destinationSql);
+        mvc.perform(get("/api/configurations/1")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.tableSql.origSql").value(originSql))
+            .andExpect(jsonPath("$.tableSql.destSql").value(destinationSql));
+        assertThat(reloads).hasValue(1);
+    }
+
+    @Test void importsMixedLiteralAndHexSqlRowsInTheirOriginalParameterOrder() throws Exception {
+        String[] originSql={"(select ID,UPDATED_AT from T where NOTE='普通?\\路径😀') orig","(select ID from U where NOTE='编码?\\\\路径') orig"};
+        String[] destinationSql={"(select ID,UPDATED_AT from V where NOTE='编码目标?\\路径') dest","(select ID from W where NOTE='普通目标?\\\\路径😀') dest"};
+        String firstOrigin="'"+originSql[0].replace("'","''")+"'";
+        String firstDestination=utf8SqlExpression(destinationSql[0]);
+        String secondOrigin=utf8SqlExpression(originSql[1]);
+        String secondDestination="'"+destinationSql[1].replace("'","''")+"'";
+        String script=axonScript("MIXED")
+            .replace("(1,'dept','MIXED','配置''说明','2','1','3','1');",
+                "(1,'dept','MIXED','配置''说明','2','1','3','1'),(2,'dept','SECOND','第二配置','2','1','3','1');")
+            .replace("(1,'ID','1','主键', '1','1','1','0'),",
+                "(1,'ID','1','主键', '1','1','1','0'),(2,'ID','1','第二主键','1','1','1','0'),")
+            .replace("'(select ID,UPDATED_AT from T where NOTE=''a;b'') orig'",firstOrigin)
+            .replace("'(select ID,UPDATED_AT from T where NOTE=''a;b'') dest'",firstDestination)
+            .replace(firstDestination+",2);",firstDestination+",2),\n(2,"+secondOrigin+",1,"+secondDestination+",2);");
+        AtomicInteger reloads=new AtomicInteger();
+        var mvc=mvc(reloads::incrementAndGet);
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(script)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.configurationCount").value(2))
+            .andExpect(jsonPath("$.tableSqlCount").value(2));
+        for(int i=0;i<2;i++) {
+            assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=?",String.class,i+1)).isEqualTo(originSql[i]);
+            assertThat(jdbc.queryForObject("SELECT DEST_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=?",String.class,i+1)).isEqualTo(destinationSql[i]);
+            mvc.perform(get("/api/configurations/"+(i+1))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.tableSql.origSql").value(originSql[i]))
+                .andExpect(jsonPath("$.tableSql.destSql").value(destinationSql[i]));
+        }
+        assertThat(reloads).hasValue(1);
+    }
+
+    @Test void rejectsInvalidHexSqlAndExpressionsOutsideSqlColumnsWithoutReplacingConfiguration() throws Exception {
+        mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
+            .andExpect(status().isCreated());
+        String validExpression=utf8SqlExpression("(select ID,UPDATED_AT from T where NOTE='中文\\路径') orig");
+        String[] invalidExpressions={
+            "CONVERT(0x0 USING utf8mb4)",
+            "CONVERT(0x USING utf8mb4)",
+            "CONVERT(0xGG USING utf8mb4)",
+            "CONVERT(0xC328 USING utf8mb4)",
+            "CONVERT(0xC080 USING utf8mb4)",
+            "CONVERT(0x410042 USING utf8mb4)",
+            "CONVERT(0x41 USING utf8)",
+            "CONVERT('SQL' USING utf8mb4)",
+            "CONVERT(0x41 USING utf8mb4) + 1",
+            "CURRENT_TIMESTAMP",
+            "CONCAT('a','b')"
+        };
+        var invalidScripts=new java.util.ArrayList<String>();
+        for(String expression:invalidExpressions) {
+            invalidScripts.add(scriptWithSqlExpressions(expression,validExpression));
+            invalidScripts.add(scriptWithSqlExpressions(validExpression,expression));
+        }
+        String validScript=scriptWithSqlExpressions(validExpression,validExpression);
+        invalidScripts.add(validScript.replace("'配置''说明'",validExpression));
+        invalidScripts.add(validScript.replace("'UPDATED_AT'",validExpression));
+        invalidScripts.add(reviserScript(validExpression,"NULL"));
+        invalidScripts.add(validScript.replace("16,'HASH',100",validExpression+",'HASH',100"));
+        invalidScripts.add(validScript.replace("16,'HASH',100","16,'HASH',"+validExpression));
+        invalidScripts.add(validScript.replace(validExpression+",1,",validExpression+","+validExpression+","));
+        AtomicInteger reloads=new AtomicInteger();
+        var mvc=mvc(reloads::incrementAndGet);
+        for(String script:invalidScripts) {
+            mvc.perform(multipart("/api/configurations/import").file(scriptFile(script)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+            assertThat(jdbc.queryForObject("SELECT BCOMP_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+            assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=22",String.class)).isEqualTo("OLD_SQL");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=22",Integer.class)).isEqualTo(1);
+        }
+        assertThat(reloads).hasValue(0);
     }
 
     @Test void importsReviserMetadataAndPreservesItWhenEditingConfiguration() throws Exception {

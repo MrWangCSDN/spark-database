@@ -57,7 +57,7 @@ public class ConfigurationRepository {
                 if(active!=null&&active>0)throw cn.sunline.tss.compare.api.ApiException.conflict("CONFIG_IMPORT_TASKS_ACTIVE","存在等待或运行任务，不能替换核对配置");
                 var parsed=parser.parse(reader,command->{
                     if(command.kind()==AxonConfigScriptParser.Kind.CLEAR)jdbc.update("DELETE FROM "+command.value());
-                    else jdbc.update(command.value());
+                    else jdbc.update(command.value(),command.parameters().toArray());
                 });
                 Long configurations=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Long.class);
                 Long fields=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW",Long.class);

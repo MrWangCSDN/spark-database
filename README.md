@@ -158,6 +158,8 @@ mvn -pl compare-service -Dtest=GaussDbConnectionIntegrationTest test
 
 Axon 的数据库比对配置版本可生成本服务直接消费的 `TSS_BCOMP_CONF_NEW`、`TSS_BCOMP_FIELD_NEW`、`TSS_BCOMP_TABLE_SQL_NEW` 数据脚本。脚本只使用既有表和字段，不创建或修改生产表结构。管理台“核对配置 → 导入 Axon 配置”负责校验和执行该固定格式，不提供通用 SQL 控制台。
 
+Axon 自定义 SQL 含反斜杠时，导出的 `orig_sql`、`dest_sql` 使用 `CONVERT(0x... USING utf8mb4)` 保存 UTF-8 正文。通过管理台导入时，服务严格解码十六进制内容，并用 JDBC 参数保存两侧查询。普通字符串形式的查询也按标准 SQL 单引号规则解析后参数化保存，反斜杠、中文、引号和换行均保留原值。此兼容修复随 bd 服务升级生效，可重新导入原下载脚本。
+
 上线按以下顺序操作：
 
 1. 暂停或处理状态1（等待中）任务，并等待状态2（运行中）任务结束；导入接口发现任一活动任务会返回 `CONFIG_IMPORT_TASKS_ACTIVE`，不会改变配置。

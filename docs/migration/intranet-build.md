@@ -30,6 +30,8 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 字段映射默认使用名称模式，配置 `FIELD_NAME` 与两侧 SQL 返回列名或 `AS` 别名按大小写不敏感方式匹配。SQL 列顺序可以不同，配置英文名必须唯一，缺列或返回重名列时任务失败；此模式忽略历史位置值。需要历史位置映射时，在部署 `config/bd.env` 中显式设置 `BD_FIELD_MATCH_BY_NAME=false`，两侧位置须为正整数且各自唯一。开关对应 `compare.field-match-by-name=${BD_FIELD_MATCH_BY_NAME:true}`。升级时同步部署匹配版本的服务、Spark 作业 JAR 和随服务打包的前端。
 
+本版管理台导入兼容 Axon 自定义 SQL 中的反斜杠。`orig_sql`、`dest_sql` 的 `CONVERT(0x... USING utf8mb4)` 由服务解码后通过 JDBC 参数保存，普通字符串查询也按标准 SQL 单引号规则解析后参数化保存。该修复升级 bd 服务即可生效，原下载脚本可直接重新导入，本次兼容修复无需数据库迁移。
+
 ## 构建与验收
 
 唯一索引空键支持通过新版 Spark 作业生效。重新构建并部署服务与 Spark 发布物后，按原核对配置重跑业务日期，核对 NULL、空串、重复次数及两侧独有统计。含空键行按 SQL 返回的原始整行值计次，部署验收时使用两侧业务约定的金额、日期等输出格式。样本中的业务键保留 NULL，重复行按照样本限额保存。
