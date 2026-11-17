@@ -6,8 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -29,16 +27,19 @@ public class SparkJobLauncher implements JobLauncher {
         if(args==null || args.length!=21) throw new IllegalArgumentException("Spark库表作业必须传入21个参数");
         String batchId=args[8];
         if(cancelledBatches.contains(batchId)) throw new CancellationException("批次已停止");
-        String resource=env.getRequiredProperty("app_resource");
-        if(!Files.isRegularFile(Path.of(resource))) throw new IllegalArgumentException("app_resource 指定的作业包不存在");
+        boolean matchByName=env.getProperty("compare.field-match-by-name",Boolean.class,true);
+        String mainClass=tableMainClass(env.getProperty("spark_mainClass","cn.sunline.tss.tssveri.spark.SparkHandlerTable"));
+        SparkJobArtifact artifact=SparkJobArtifact.inspect(env.getRequiredProperty("app_resource"),mainClass,matchByName);
+        String matchMode=matchByName?"NAME":"POSITION";
+        log.info("提交Spark作业 resource={}, sha256={}, main={}, fieldMatch={}",artifact.path(),artifact.sha256(),mainClass,matchMode);
         Map<String,String> childEnv=new HashMap<>();
         String hadoop=env.getProperty("hadoop_conf_dir");
         if(hadoop!=null && !hadoop.isBlank()) childEnv.put("HADOOP_CONF_DIR",hadoop);
         var launcher=new SparkLauncher(childEnv)
             .setSparkHome(env.getRequiredProperty("spark_home"))
             .setMaster(env.getRequiredProperty("spark.master.path"))
-            .setAppResource(resource)
-            .setMainClass(tableMainClass(env.getProperty("spark_mainClass","cn.sunline.tss.tssveri.spark.SparkHandlerTable")))
+            .setAppResource(artifact.path().toString())
+            .setMainClass(mainClass)
             .setDeployMode(env.getProperty("spark.submit.deployMode","client"))
             .setVerbose(false).addAppArgs(args);
         // 使用原资源配置键；默认值来自原 application-spark.properties。
@@ -52,8 +53,7 @@ public class SparkJobLauncher implements JobLauncher {
         int detailLimit=env.getProperty("compare.result.detail-limit",Integer.class,100);
         if(detailLimit<0||detailLimit>10000) throw new IllegalArgumentException("差异明细上限必须在0..10000之间");
         launcher.setConf("spark.compare.detailLimit",Integer.toString(detailLimit));
-        launcher.setConf("spark.compare.fieldMatchByName",Boolean.toString(
-            env.getProperty("compare.field-match-by-name",Boolean.class,true)));
+        launcher.setConf("spark.compare.fieldMatchByName",Boolean.toString(matchByName));
         launcher.setConf("spark.gdb.jdbc-url-prefixes", gdbJdbcUrlPrefixes(env));
         String opens="--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED -XX:+IgnoreUnrecognizedVMOptions";
         launcher.setConf("spark.driver.extraJavaOptions",env.getProperty("spark.driver.extraJavaOptions",opens));
@@ -66,7 +66,7 @@ public class SparkJobLauncher implements JobLauncher {
         var finished=new CountDownLatch(1);
         SparkAppHandle handle=launcher.startApplication(new SparkAppHandle.Listener() {
             @Override public void stateChanged(SparkAppHandle app) {
-                log.info("Spark application={}, state={}",app.getAppId(),app.getState());
+                log.info("Spark application={}, state={}, sha256={}, fieldMatch={}",app.getAppId(),app.getState(),artifact.sha256(),matchMode);
                 if(app.getState().isFinal()) finished.countDown();
             }
             @Override public void infoChanged(SparkAppHandle app) { }

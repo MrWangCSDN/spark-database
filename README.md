@@ -59,6 +59,10 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 
 字段映射默认按配置 `FIELD_NAME` 与两侧 SQL 返回列名或 `AS` 别名匹配，不区分大小写。两侧 SQL 可使用不同列顺序，例如 `source_column AS FIELD_NAME`；配置字段英文名必须唯一，SQL 缺少对应列或返回重名列时任务失败。旧 `FIELD_OLD_INDEX`、`FIELD_NEW_INDEX` 继续保留，名称模式忽略其位置值。部署属性 `compare.field-match-by-name=${BD_FIELD_MATCH_BY_NAME:true}` 控制此行为；显式设置 `BD_FIELD_MATCH_BY_NAME=false` 可使用历史位置映射，位置必须为正整数且两侧各自唯一。升级时同时部署匹配版本的服务与 Spark 作业 JAR，并使用本次构建中集成的前端。
 
+名称模式提交任务前，服务检查最终 `app_resource` 指向的真实 JAR，确认其中包含所选主类和 `QueryFieldResolver`。缺少必需类时，任务会直接显示实际作业路径及部署错误。提交日志记录作业真实路径、SHA-256、主类和字段匹配模式，并通过 SHA-256 与 application ID 关联。Spark Driver 启动时记录实际加载的作业类来源和匹配模式。配置文件中的 `app_resource` 应指向本次发布物的 `jobs/compare-spark-1.0.0-SNAPSHOT.jar`。
+
+Spark 3.4.0 集群使用 `-Pspark-3.4` 构建，配套作业模块 Jackson 2.14.2。默认构建使用 Spark 3.5.3 和作业模块 Jackson 2.15.2。两种构建均保持服务独立的 Spring Boot Jackson 依赖管理。
+
 ## 管理台
 
 服务根路径打开管理台，提供运行总览、任务创建与分页查询、任务详情和差异分页、核对配置创建/编辑/复制、数据库连接创建/编辑，以及 light/dark/system 主题。列表默认每页20条，最多100条；页面仅管理 `BCOMP_TYPE='2'`。

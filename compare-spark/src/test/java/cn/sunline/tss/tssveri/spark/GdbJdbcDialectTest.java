@@ -25,4 +25,14 @@ class GdbJdbcDialectTest {
             assertFalse(connection.getAutoCommit());
         }
     }
+    @Test
+    void supportsMysqlLimitWithoutPushingOffsetThroughGenericQueryBuilder() {
+        var dialect=new GdbJdbcDialect();
+        assertTrue(dialect.supportsLimit());
+        assertEquals("LIMIT 10",dialect.getLimitClause(10));
+        assertEquals("",dialect.getLimitClause(0));
+        assertEquals("",dialect.getOffsetClause(0));
+        assertFalse(dialect.supportsOffset());
+    }
+
 }

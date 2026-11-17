@@ -30,9 +30,19 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 字段映射默认使用名称模式，配置 `FIELD_NAME` 与两侧 SQL 返回列名或 `AS` 别名按大小写不敏感方式匹配。SQL 列顺序可以不同，配置英文名必须唯一，缺列或返回重名列时任务失败；此模式忽略历史位置值。需要历史位置映射时，在部署 `config/bd.env` 中显式设置 `BD_FIELD_MATCH_BY_NAME=false`，两侧位置须为正整数且各自唯一。开关对应 `compare.field-match-by-name=${BD_FIELD_MATCH_BY_NAME:true}`。升级时同步部署匹配版本的服务、Spark 作业 JAR 和随服务打包的前端。
 
+部署时核对最终生效的 `app_resource`，推荐值为 `${COMPARE_HOME}/jobs/compare-spark-1.0.0-SNAPSHOT.jar`。名称模式会在任务提交前检查这个实际 JAR 中的主类和 `QueryFieldResolver`，部署错误会连同路径返回任务详情。提交日志中的 `resource`、`sha256`、`fieldMatch` 及 Spark Driver 日志中的“作业类来源”用于核对实际执行文件。构建发布物应在项目根目录运行 `bin/package.sh`，该入口同时构建服务和 Spark 模块。
+
 本版管理台导入兼容 Axon 自定义 SQL 中的反斜杠。`orig_sql`、`dest_sql` 的 `CONVERT(0x... USING utf8mb4)` 由服务解码后通过 JDBC 参数保存，普通字符串查询也按标准 SQL 单引号规则解析后参数化保存。该修复升级 bd 服务即可生效，原下载脚本可直接重新导入，本次兼容修复无需数据库迁移。
 
 ## 构建与验收
+
+现场 Spark 为 3.4.0 时，在源码根目录使用以下入口，`spark-3.4` 同时选择匹配的 Spark 3.4.0 和作业模块 Jackson 2.14.2。
+
+```bash
+bin/package.sh -Pspark-3.4 -Dskip.installnodenpm=true -Dskip.npm=true clean
+```
+
+默认构建选择 Spark 3.5.3 和作业模块 Jackson 2.15.2。服务的 Spring Boot Jackson 依赖使用独立依赖管理。完成构建后，部署发布包里的 `lib/compare-service-1.0.0-SNAPSHOT.jar` 和 `jobs/compare-spark-1.0.0-SNAPSHOT.jar`，并核对 `app_resource` 的最终路径。
 
 唯一索引空键支持通过新版 Spark 作业生效。重新构建并部署服务与 Spark 发布物后，按原核对配置重跑业务日期，核对 NULL、空串、重复次数及两侧独有统计。含空键行按 SQL 返回的原始整行值计次，部署验收时使用两侧业务约定的金额、日期等输出格式。样本中的业务键保留 NULL，重复行按照样本限额保存。
 

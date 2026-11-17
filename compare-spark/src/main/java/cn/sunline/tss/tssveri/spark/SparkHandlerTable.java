@@ -133,6 +133,8 @@ public class SparkHandlerTable {
             }
 
             boolean matchByName=Boolean.parseBoolean(sc.conf().get("spark.compare.fieldMatchByName","true"));
+            var classSource=SparkHandlerTable.class.getProtectionDomain().getCodeSource();
+            log.info("字段匹配模式={}, 作业类来源={}",matchByName?"NAME":"POSITION",classSource==null?"unknown":classSource.getLocation());
             Class.forName(args[OLD_DRIVER_INDEX]);
             try(Connection connection=DriverManager.getConnection(args[OLD_URL_INDEX],args[OLD_USER_INDEX],args[OLD_PASSWORD_INDEX])) {
                 tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[OLD_TABLE_INDEX],tssBcompFieldDataRows,

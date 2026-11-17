@@ -7,9 +7,9 @@
     <version>1.0.0-SNAPSHOT</version>
   </parent>
   <artifactId>compare-spark</artifactId>
-  <!-- Spark 3.5.3 的 Scala Jackson 模块要求 2.15.x，运行时使用集群提供的版本。 -->
+  <!-- Spark 模块使用与集群匹配的 Jackson，运行时由 Spark 集群提供。 -->
   <properties>
-    <jackson-bom.version>2.15.2</jackson-bom.version>
+    <jackson-bom.version>${spark-jackson.version}</jackson-bom.version>
   </properties>
   <dependencies>
     <dependency>

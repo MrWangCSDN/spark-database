@@ -3,8 +3,6 @@ package cn.sunline.tss.tssveri.spark;
 import org.apache.spark.sql.jdbc.JdbcDialect;
 import org.apache.spark.sql.jdbc.JdbcDialects;
 import org.apache.spark.sql.jdbc.MySQLDialect$;
-import org.apache.spark.sql.jdbc.JdbcSQLQueryBuilder;
-import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.MetadataBuilder;
 import org.apache.spark.sql.jdbc.JdbcType;
@@ -67,16 +65,21 @@ public final class GdbJdbcDialect extends JdbcDialect {
         return MySQLDialect$.MODULE$.getSchemaQuery(table);
     }
 
-    @Override public JdbcSQLQueryBuilder getJdbcSQLQueryBuilder(JDBCOptions options) {
-        return MySQLDialect$.MODULE$.getJdbcSQLQueryBuilder(options);
+    @Override public String getLimitClause(Integer limit) {
+        return MySQLDialect$.MODULE$.getLimitClause(limit);
     }
 
-    @Override public boolean supportsLimit() {
-        return MySQLDialect$.MODULE$.supportsLimit();
+    @Override public String getOffsetClause(Integer offset) {
+        return MySQLDialect$.MODULE$.getOffsetClause(offset);
     }
 
-    @Override public boolean supportsOffset() {
-        return MySQLDialect$.MODULE$.supportsOffset();
+    // Spark 3.5 adds these capability methods; keep source compatibility with 3.4.
+    public boolean supportsLimit() {
+        return true;
+    }
+
+    public boolean supportsOffset() {
+        return false;
     }
 
     private static Set<String> parse(String raw) {
