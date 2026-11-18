@@ -34,6 +34,36 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 本版管理台导入兼容 Axon 自定义 SQL 中的反斜杠。`orig_sql`、`dest_sql` 的 `CONVERT(0x... USING utf8mb4)` 由服务解码后通过 JDBC 参数保存，普通字符串查询也按标准 SQL 单引号规则解析后参数化保存。该修复升级 bd 服务即可生效，原下载脚本可直接重新导入，本次兼容修复无需数据库迁移。
 
+## Spark 本地磁盘配置
+
+新版服务会将应用配置中的非空 `spark.local.dir` 传入 Spark 提交命令，支持含空格路径及逗号分隔的多个目录。缺失或空白时由 Spark 自身配置选择目录。可在部署的 `config/application-local.properties` 中设置以下属性，将示例路径替换为实际的大磁盘目录。
+
+```properties
+spark.local.dir=/data/spark-local
+spark.rdd.compress=true
+```
+
+正常服务提交默认启用 `spark.rdd.compress=true`，压缩 `MEMORY_AND_DISK_SER` 的序列化 RDD 缓存及其落盘内容，可显式设置 `false`。压缩会消耗 CPU，磁盘收益取决于实际数据。两阶段统计缓存完整 cogroup 数据，包含全部配置字段和一致记录，样本上限控制最终保存的差异样本数量。
+
+Standalone 部署还需在每个 Worker 实际使用的 `${SPARK_CONF_DIR:-$SPARK_HOME/conf}/spark-env.sh` 中设置本地根目录。
+
+```bash
+export SPARK_LOCAL_DIRS=/data/spark-local
+```
+
+各节点目录需存在于预期挂载点，且 Spark 运行账户可写。等待在途作业结束后重启相应 Worker，再发起新任务。Spark 3.4 的 Standalone Worker 会为 Executor 设置 `SPARK_EXECUTOR_DIRS`，该值优先于应用的 `spark.local.dir`。因此需要逐个 Worker 核对运行环境与最终缓存目录。
+
+每个 Executor 每个应用首次读取时会输出“Spark 本地存储”日志，包含实际 `DiskBlockManager` 目录、executorId、可用字节数、总字节数及缓存压缩开关。Spark 自身的 `Created local directory at .../blockmgr-...` 日志也可以核对实际路径。在报错 Executor 所在节点执行下面的只读检查，替换为日志中的实际目录。
+
+```bash
+spark_dir='/data/spark-local'
+df -hT "$spark_dir"
+df -i "$spark_dir"
+findmnt -T "$spark_dir"
+```
+
+核对可用容量、inode 及挂载点，结合任务执行时的峰值占用判断容量。磁盘总容量 600 GB 仍需结合该节点实际剩余空间、缓存行宽、压缩率和并发任务评估。
+
 ## 构建与验收
 
 现场 Spark 为 3.4.0 时，在源码根目录使用以下入口，`spark-3.4` 同时选择匹配的 Spark 3.4.0 和作业模块 Jackson 2.14.2。

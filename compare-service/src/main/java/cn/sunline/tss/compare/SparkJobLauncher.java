@@ -42,14 +42,17 @@ public class SparkJobLauncher implements JobLauncher {
             .setMainClass(mainClass)
             .setDeployMode(env.getProperty("spark.submit.deployMode","client"))
             .setVerbose(false).addAppArgs(args);
-        // 使用原资源配置键；默认值来自原 application-spark.properties。
+        // 沿用原资源配置键，同时默认压缩序列化 RDD 缓存。
         Map<String,String> defaults=Map.ofEntries(
             Map.entry("spark.cores.max","144"),Map.entry("spark.executor.cores","4"),
             Map.entry("spark.executor.memory","10g"),Map.entry("spark.executor.memoryOverhead","2g"),
             Map.entry("spark.executor.instances","36"),Map.entry("spark.default.parallelism","500"),
             Map.entry("spark.driver.maxResultSize","6g"),Map.entry("spark.sql.shuffle.partitions","2000"),
-            Map.entry("spark.driver.memory","6g"),Map.entry("spark.network.timeout","300"));
+            Map.entry("spark.driver.memory","6g"),Map.entry("spark.network.timeout","300"),
+            Map.entry("spark.rdd.compress","true"));
         defaults.forEach((key,value) -> launcher.setConf(key,env.getProperty(key,value)));
+        String localDirectories=env.getProperty("spark.local.dir");
+        if(localDirectories!=null&&!localDirectories.isBlank()) launcher.setConf("spark.local.dir",localDirectories);
         int detailLimit=env.getProperty("compare.result.detail-limit",Integer.class,100);
         if(detailLimit<0||detailLimit>10000) throw new IllegalArgumentException("差异明细上限必须在0..10000之间");
         launcher.setConf("spark.compare.detailLimit",Integer.toString(detailLimit));

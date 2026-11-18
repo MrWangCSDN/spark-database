@@ -43,6 +43,11 @@ spark.driver.maxResultSize=${SPARK_DRIVER_MAX_RESULT_SIZE:1g}
 spark.sql.shuffle.partitions=${SPARK_SQL_SHUFFLE_PARTITIONS:2000}
 spark.driver.memory=${SPARK_DRIVER_MEMORY:1g}
 spark.network.timeout=${SPARK_NETWORK_TIMEOUT:300}
+# 序列化 RDD 缓存压缩，减少完整分组缓存的内存与落盘体积。
+spark.rdd.compress=${SPARK_RDD_COMPRESS:true}
+# 可选本地目录，支持逗号分隔的多目录。请填写运行节点的实际大磁盘路径。
+# spark.local.dir=/data/spark-local
+# Standalone Executor 使用各 Worker 的本地目录，请同步配置 Worker 的 SPARK_LOCAL_DIRS。
 
 tssveritask.executor.thread.enable=${BD_TASKS_ENABLED:true}
 tssveritask.executor.thread.maxPoolSize=${BD_TASK_CONCURRENCY:1}

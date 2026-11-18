@@ -772,7 +772,10 @@ public class SparkHandlerTable {
 
     /** Map each complete primary key to configured field values. */
     static JavaPairRDD<String, CountedRow> RddToPair(String type,JavaRDD<Row> rowJavaRDD, Broadcast<List<Row>> bcField){
-        JavaPairRDD<String, CountedRow> javaPairRDD = rowJavaRDD.mapToPair(line -> {
+        JavaPairRDD<String, CountedRow> javaPairRDD = rowJavaRDD.mapPartitions(rows -> {
+            SparkLocalStorage.logOnce();
+            return rows;
+        }).mapToPair(line -> {
             ArrayList<String> keyList= new ArrayList<>();
             ArrayList<String> valueList= new ArrayList<>();
             boolean multiset=false;
