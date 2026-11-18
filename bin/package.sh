@@ -2,16 +2,25 @@
 set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_dir"
+service_jar="compare-service/target/compare-service-1.0.0-SNAPSHOT.jar"
+spark_jar="compare-spark/target/compare-spark-1.0.0-SNAPSHOT.jar"
+rm -f "$service_jar" "$spark_jar"
 mvn "$@" verify
-jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar | grep -q '^BOOT-INF/classes/static/index.html$'
+for artifact in "$service_jar" "$spark_jar"; do
+  if [[ ! -s "$artifact" ]]; then
+    printf '缺少本次构建产物 %s，请同时构建 compare-service 和 compare-spark 后再打包。\n' "$artifact" >&2
+    exit 1
+  fi
+done
+jar tf "$service_jar" | grep -q '^BOOT-INF/classes/static/index.html$'
 mkdir -p "$project_dir/target"
 staging_dir="$(mktemp -d "$project_dir/target/tss-package.XXXXXX")"
 # 只清理本次创建的临时目录，避免把旧解压目录中的现场配置打入新发布包。
 trap 'rm -rf "$staging_dir"' EXIT
 bundle="$staging_dir/tss-compare"
 mkdir -p "$bundle"/{lib,jobs,drivers,config,bin}
-cp compare-service/target/compare-service-1.0.0-SNAPSHOT.jar "$bundle/lib/"
-cp compare-spark/target/compare-spark-1.0.0-SNAPSHOT.jar "$bundle/jobs/"
+cp "$service_jar" "$bundle/lib/"
+cp "$spark_jar" "$bundle/jobs/"
 cp compare-spark/target/jdbc/*.jar "$bundle/drivers/"
 cp config/application-local.properties.example "$bundle/config/"
 cp config/application-local.properties.example "$bundle/config/application-local.properties"

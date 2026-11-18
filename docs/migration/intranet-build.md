@@ -32,6 +32,19 @@ npm config set registry https://your-internal-npm/repository/npm-group/
 
 部署时核对最终生效的 `app_resource`，推荐值为 `${COMPARE_HOME}/jobs/compare-spark-1.0.0-SNAPSHOT.jar`。名称模式会在任务提交前检查这个实际 JAR 中的主类和 `QueryFieldResolver`，部署错误会连同路径返回任务详情。提交日志中的 `resource`、`sha256`、`fieldMatch` 及 Spark Driver 日志中的“作业类来源”用于核对实际执行文件。构建发布物应在项目根目录运行 `bin/package.sh`，该入口同时构建服务和 Spark 模块。
 
+发布入口会先移除两个模块的旧目标 JAR，再校验本次 Maven 构建生成的 service 和 Spark 产物。使用 `-pl` 时需要同时包含 `compare-service,compare-spark`。这样可以防止单独构建一个模块时沿用另一个模块目录中的旧 JAR。
+
+在实际 bd 部署目录执行下列检查，`job_jar` 使用当前生效 `app_resource` 指向的文件。
+
+```bash
+job_jar='jobs/compare-spark-1.0.0-SNAPSHOT.jar'
+jar tf "$job_jar" | grep 'QueryFieldResolver.class'
+javap -classpath "$job_jar" -p cn.sunline.tss.tssveri.spark.SparkHandlerTable \
+  | grep 'lambda.*RddToPair'
+```
+
+本次 JDK 17 构建的行映射方法为 `lambda$RddToPair$64ed6cd6$1`，历史位置读取实现包含 `lambda$RddToPair$4f96395$1`。结合本次任务的提交日志与 Driver 作业类来源，可进一步定位实际提交文件或 Spark 类路径中的旧同名类。
+
 本版管理台导入兼容 Axon 自定义 SQL 中的反斜杠。`orig_sql`、`dest_sql` 的 `CONVERT(0x... USING utf8mb4)` 由服务解码后通过 JDBC 参数保存，普通字符串查询也按标准 SQL 单引号规则解析后参数化保存。该修复升级 bd 服务即可生效，原下载脚本可直接重新导入，本次兼容修复无需数据库迁移。
 
 ## Spark 本地磁盘配置
