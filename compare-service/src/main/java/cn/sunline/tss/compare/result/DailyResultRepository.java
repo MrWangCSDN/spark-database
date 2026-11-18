@@ -11,16 +11,28 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.TransactionDefinition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import javax.sql.DataSource;
 import java.util.*;
 
 @Repository
 public class DailyResultRepository {
+    private static final Logger log=LoggerFactory.getLogger(DailyResultRepository.class);
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final TransactionTemplate exportTransaction;
     private final ObjectMapper json;
     private final MetadataSqlDialect dialect;
-    private static final RowMapper<DailyResultSummary> MAPPER=DataClassRowMapper.newInstance(DailyResultSummary.class);
+    private static final RowMapper<DailyResultSummary> MAPPER=(rs,n)->new DailyResultSummary(
+        rs.getLong("BCOMP_INDEX"),rs.getString("RESULT_DATE"),rs.getString("RUN_ID"),rs.getString("TASK_BUSI_DATE"),
+        rs.getString("TASK_BATCH"),rs.getString("TIME_NODE"),rs.getString("CONFIGURATION_NAME"),rs.getString("CONFIGURATION_MODULE"),
+        rs.getString("REVISER_NAME"),rs.getString("REVISER_USERNAME"),rs.getObject("ORIGIN_DATABASE_ID",Long.class),
+        rs.getString("ORIGIN_DATABASE_NAME"),rs.getObject("DESTINATION_DATABASE_ID",Long.class),rs.getString("DESTINATION_DATABASE_NAME"),
+        rs.getLong("ORIGIN_COUNT"),rs.getLong("DESTINATION_COUNT"),rs.getLong("MATCHED_COUNT"),rs.getLong("ONLY_ORIGIN_COUNT"),
+        rs.getLong("ONLY_DESTINATION_COUNT"),rs.getLong("DIFFERENT_COUNT"),rs.getInt("DETAIL_LIMIT"),rs.getInt("ORIGIN_SAMPLES"),
+        rs.getInt("DESTINATION_SAMPLES"),rs.getInt("DIFFERENT_SAMPLES"),rs.getString("PUBLISHED_AT"),rs.getString("DETAILS_EXPIRED"));
     public DailyResultRepository(DataSource source,ObjectMapper json) {
         this(source, json, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
     }
@@ -28,21 +40,105 @@ public class DailyResultRepository {
     public DailyResultRepository(DataSource source,ObjectMapper json, MetadataSqlDialect dialect) {
         jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(30);
         transaction=new TransactionTemplate(new DataSourceTransactionManager(source));this.json=json;this.dialect=dialect;
+        exportTransaction=new TransactionTemplate(new DataSourceTransactionManager(source));
+        exportTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        exportTransaction.setTimeout(30);
     }
     public record ConnectionGroup(Long originDatabaseId,String originDatabaseName,Long destinationDatabaseId,String destinationDatabaseName,long objectCount) {}
     public record Results(PageResult<DailyResultSummary> results,List<ConnectionGroup> connections) {}
     public record Sample(String businessKey,JsonNode detail) {}
     public record Samples(DailyResultSummary summary,List<Sample> items,int page,int size,long total) {}
     public Results list(String date,int page,int size) {
-        long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=?",Long.class,date);
-        var pageSql=dialect.page("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=? ORDER BY BCOMP_INDEX",(long)page*size,size);
-        var pageParams=new ArrayList<Object>();pageParams.add(date);pageParams.addAll(pageSql.parameters());
-        var items=jdbc.query(pageSql.sql(),MAPPER,pageParams.toArray());
-        var groups=jdbc.query("SELECT ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,COUNT(*) FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=? GROUP BY ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME ORDER BY ORIGIN_DATABASE_ID,DESTINATION_DATABASE_ID",
-            (rs,n)->new ConnectionGroup(rs.getObject(1,Long.class),rs.getString(2),rs.getObject(3,Long.class),rs.getString(4),rs.getLong(5)),date);
+        return list(date,page,size,null,null,null);
+    }
+    public Results list(String date,int page,int size,String domain,String configurationName,String reviser) {
+        var where=new StringBuilder(" WHERE RESULT_DATE=?");
+        var args=new ArrayList<Object>();args.add(date);
+        if(domain!=null&&!domain.isBlank()) {
+            where.append(" AND (LOWER(COALESCE(CONFIGURATION_MODULE,'')) LIKE ? ESCAPE '!' OR LOWER(CASE LOWER(CONFIGURATION_MODULE) WHEN 'dept' THEN '存款组' WHEN 'loan' THEN '贷款组' WHEN 'comm' THEN '公共组' WHEN 'sett' THEN '结算组' WHEN 'platform' THEN '平台组' ELSE COALESCE(CONFIGURATION_MODULE,'') END) LIKE ? ESCAPE '!')");
+            String value=contains(domain);args.add(value);args.add(value);
+        }
+        if(configurationName!=null&&!configurationName.isBlank()) {
+            where.append(" AND LOWER(COALESCE(CONFIGURATION_NAME,'')) LIKE ? ESCAPE '!'");args.add(contains(configurationName));
+        }
+        if(reviser!=null&&!reviser.isBlank()) {
+            where.append(" AND (LOWER(COALESCE(REVISER_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(REVISER_USERNAME,'')) LIKE ? ESCAPE '!')");
+            String value=contains(reviser);args.add(value);args.add(value);
+        }
+        long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_RESULT_NEW"+where,Long.class,args.toArray());
+        var pageSql=dialect.page("SELECT * FROM TSS_BCOMP_RESULT_NEW"+where+" ORDER BY BCOMP_INDEX",(long)page*size,size);
+        var pageArgs=new ArrayList<>(args);pageArgs.addAll(pageSql.parameters());
+        var items=jdbc.query(pageSql.sql(),MAPPER,pageArgs.toArray());
+        var groups=jdbc.query("SELECT ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,COUNT(*) FROM TSS_BCOMP_RESULT_NEW"+where+" GROUP BY ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME ORDER BY ORIGIN_DATABASE_ID,DESTINATION_DATABASE_ID",
+            (rs,n)->new ConnectionGroup(rs.getObject(1,Long.class),rs.getString(2),rs.getObject(3,Long.class),rs.getString(4),rs.getLong(5)),args.toArray());
         return new Results(new PageResult<>(items,page,size,total),groups);
     }
+    private static String contains(String value) {
+        return "%"+value.trim().toLowerCase(Locale.ROOT).replace("!","!!").replace("%","!%").replace("_","!_")+"%";
+    }
     public DailyResultSummary exact(long index,String date) { return find(index,date,false); }
+    private record ExportResult(DailyResultSummary summary,int version,int fieldCountSize) {}
+    public DailyResultExportSnapshot exportSnapshot(String date) {
+        try {return exportTransaction.execute(status->readExportSnapshot(date));}
+        catch(ApiException error){throw error;}
+        catch(RuntimeException error){throw ApiException.internal("RESULT_EXPORT_FAILED","读取每日核对字段统计失败，请根据日志检查结果结构及版本",error);}
+    }
+    private DailyResultExportSnapshot readExportSnapshot(String date) {
+        var rows=jdbc.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE RESULT_DATE=? ORDER BY BCOMP_INDEX FOR UPDATE",
+            (rs,n)->new ExportResult(MAPPER.mapRow(rs,n),rs.getInt("FIELD_COUNTS_VERSION"),rs.getInt("FIELD_COUNTS_SIZE")),date);
+        if(rows.isEmpty()) return new DailyResultExportSnapshot(List.of());
+        var locked=new LinkedHashMap<Long,ExportResult>();
+        rows.forEach(row->locked.put(row.summary().bcompIndex(),row));
+        var counts=new HashMap<Long,List<DailyResultFieldCounts.StoredFieldCount>>();
+        jdbc.query("SELECT BCOMP_INDEX,RUN_ID,FIELD_NAME,DIFFERENT_COUNT FROM TSS_BCOMP_FIELD_COUNT_NEW WHERE RESULT_DATE=?",
+            (RowCallbackHandler)rs->{
+                long index=rs.getLong(1);
+                if(locked.containsKey(index)) counts.computeIfAbsent(index,ignored->new ArrayList<>())
+                    .add(new DailyResultFieldCounts.StoredFieldCount(rs.getString(2),rs.getString(3),rs.getLong(4)));
+            },date);
+        var patterns=new HashMap<Long,List<FieldPatternResult>>();
+        if(rows.stream().anyMatch(row->row.version()==0&&row.summary().differentCount()>0)) {
+            jdbc.query("SELECT f.BCOMP_INDEX,f.RUN_ID,f.PATTERN_ID,f.FIELDS_JSON,f.DIFFERENT_COUNT,f.SAMPLE_COUNT,f.COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW f JOIN TSS_BCOMP_RESULT_NEW r ON r.BCOMP_INDEX=f.BCOMP_INDEX AND r.RESULT_DATE=f.RESULT_DATE WHERE f.RESULT_DATE=? AND r.FIELD_COUNTS_VERSION=0 AND r.DIFFERENT_COUNT>0",
+                (RowCallbackHandler)rs->{
+                    long index=rs.getLong(1);var row=locked.get(index);
+                    if(row==null) return;
+                    if(!row.summary().runId().equals(rs.getString(2))) {
+                        log.warn("Daily result export invalid: date={}, configurationId={}, reason=legacy_run_mismatch",date,index);
+                        throw ApiException.internal("RESULT_EXPORT_FAILED","历史字段组合结果版本不一致",null);
+                    }
+                    try {
+                        patterns.computeIfAbsent(index,ignored->new ArrayList<>()).add(new FieldPatternResult(
+                            rs.getString(3),parseExportFields(rs.getString(4)),rs.getLong(5),rs.getInt(6),rs.getInt(7)));
+                    } catch(java.sql.SQLException error) {
+                        log.warn("Daily result export invalid: date={}, configurationId={}, reason=legacy_pattern_read_failed",date,index);
+                        throw error;
+                    }
+                },date);
+        }
+        var results=new ArrayList<DailyResultExportSnapshot.TableResult>();
+        var unavailable=new ArrayList<String>();
+        int unavailableCount=0;
+        for(var row:rows) {
+            var summary=row.summary();long index=summary.bcompIndex();
+            try {
+                var storedCounts=counts.getOrDefault(index,List.of());
+                if(row.version()==1 && row.fieldCountSize()!=storedCounts.size())
+                    throw ApiException.internal("RESULT_EXPORT_FAILED","字段统计记录数与发布清单不一致",null);
+                results.add(new DailyResultExportSnapshot.TableResult(summary,DailyResultFieldCounts.resolve(summary,row.version(),
+                    storedCounts,patterns.getOrDefault(index,List.of()))));
+            } catch(ApiException error) {
+                // Resolver messages are fixed validation reasons, never business values or SQL.
+                log.warn("Daily result export invalid: date={}, configurationId={}, code={}, reason={}",date,index,error.code(),error.getMessage());
+                if(!"FIELD_COUNTS_UNAVAILABLE".equals(error.code())) throw error;
+                unavailableCount++;
+                if(unavailable.size()<10) unavailable.add(summary.configurationName()+"（配置"+index+"）");
+            }
+        }
+        if(unavailableCount>0) throw ApiException.conflict("FIELD_COUNTS_UNAVAILABLE",date+" 的 "+unavailableCount+
+            " 张核对表缺少完整字段统计："+String.join("、",unavailable)+
+            (unavailableCount>10?"，其余"+(unavailableCount-10)+"张":"")+"。请重新核对后导出。");
+        return new DailyResultExportSnapshot(results);
+    }
     private DailyResultSummary find(long index,String date,boolean lock) {
         var rows=jdbc.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?"+(lock?" FOR UPDATE":""),MAPPER,index,date);
         if(rows.isEmpty()) throw ApiException.notFound("RESULT_NOT_FOUND","该核对日期尚无成功发布的结果");
@@ -56,6 +152,19 @@ public class DailyResultRepository {
             return jdbc.query("SELECT PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT,COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND RUN_ID=? ORDER BY CASE WHEN PATTERN_ID='__OTHER__' THEN 1 ELSE 0 END,DIFFERENT_COUNT DESC,PATTERN_ID ASC",
                 (rs,n)->new FieldPatternResult(rs.getString(1),parseFields(rs.getString(2)),rs.getLong(3),rs.getInt(4),rs.getInt(5)),index,date,version);
         });
+    }
+    private List<String> parseExportFields(String value) throws java.sql.SQLException {
+        try {
+            JsonNode root=json.readerFor(JsonNode.class)
+                .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(value);
+            if(root==null||!root.isArray()) throw new java.sql.SQLException("差异字段组合必须是字符串数组");
+            var fields=new ArrayList<String>();
+            for(JsonNode field:root) {
+                if(!field.isTextual()) throw new java.sql.SQLException("差异字段组合成员必须是字符串");
+                fields.add(field.textValue());
+            }
+            return fields;
+        } catch(java.io.IOException error){throw new java.sql.SQLException("差异字段组合格式错误",error);}
     }
     private List<String> parseFields(String value) throws java.sql.SQLException {
         try {return json.readValue(value,new com.fasterxml.jackson.core.type.TypeReference<List<String>>(){});}

@@ -1,7 +1,11 @@
 package cn.sunline.tss.compare.result;
 
 import cn.sunline.tss.compare.api.ApiException;
+import org.springframework.http.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
@@ -9,10 +13,28 @@ import java.time.format.DateTimeFormatter;
 @RequestMapping("/api/results")
 public class DailyResultController {
     private final DailyResultRepository repository;
-    public DailyResultController(DailyResultRepository repository) { this.repository=repository; }
+    private final DailyResultExportService exportService;
+    public DailyResultController(DailyResultRepository repository) {
+        this(repository,new DailyResultExportService(repository,new DailyResultWorkbookWriter()));
+    }
+    @Autowired
+    public DailyResultController(DailyResultRepository repository,DailyResultExportService exportService) {
+        this.repository=repository;this.exportService=exportService;
+    }
     @GetMapping
-    DailyResultRepository.Results list(@RequestParam String date,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
-        validate(date,page,size);return repository.list(date,page,size);
+    DailyResultRepository.Results list(@RequestParam String date,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,
+            @RequestParam(required=false) String domain,@RequestParam(required=false) String configurationName,@RequestParam(required=false) String reviser) {
+        validate(date,page,size);return repository.list(date,page,size,domain,configurationName,reviser);
+    }
+    @GetMapping("/export")
+    ResponseEntity<byte[]> export(@RequestParam(required=false) String date) {
+        validate(date,0,20);
+        byte[] body=exportService.export(date);
+        String encoded=URLEncoder.encode("每日核对结果-"+date+".xlsx",StandardCharsets.UTF_8).replace("+","%20");
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=\"daily-results-"+date+".xlsx\"; filename*=UTF-8''"+encoded)
+            .body(body);
     }
     @GetMapping("/{index}/{date}")
     DailyResultSummary exact(@PathVariable long index,@PathVariable String date) { validate(date,0,20);return repository.exact(index,date); }

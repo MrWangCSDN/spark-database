@@ -12,7 +12,7 @@
 |---|---|
 | JDK | 17；不要使用本机默认 JDK 25 构建当前 Lombok 版本 |
 | Maven | 3.9 或更高版本 |
-| Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、Jasypt Starter 3.0.5、BES Lite Starter `bes.springframework.boot:bes-lite-spring-boot-starter:3.x-11.5.0.004`、前端 Maven 插件、JDBC 驱动及全部传递依赖；还要预置 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`。BES 与该 openGauss 版本不在 Maven Central |
+| Maven 仓库 | 内网 Nexus/Artifactory 必须代理或预置 Spring Boot 3.3.10、Spark 3.5.3、Jasypt Starter 3.0.5、BES Lite Starter `bes.springframework.boot:bes-lite-spring-boot-starter:3.x-11.5.0.004`、前端 Maven 插件、JDBC 驱动及全部传递依赖。导出报表需要 `org.apache.poi:poi-ooxml:5.3.0` 及其传递依赖。还要预置 `org.opengauss:opengauss-jdbc:6.0.0-htrunk8`，Spark 3.4 现场需预置该 profile 的 Spark 3.4.0 和 Jackson 2.14.2 依赖。BES 与该 openGauss 版本由企业制品库提供 |
 | Node/npm | 使用预编译前端的构建命令时不需要；只有在内网修改并重编前端时，才需 Node `22.14.0`、npm `10.9.2` 和锁定的 npm 包 |
 | 构建资源 | 建议至少 4 CPU、8 GiB 内存和 5 GiB 可用磁盘 |
 
@@ -50,6 +50,33 @@ bin/package.sh -Pspark-3.4 -Dskip.installnodenpm=true -Dskip.npm=true clean
 
 Axon 新版 `_new` 导出为 13 列配置，在原 11 列后追加 nullable 的 `reviser_name,reviser_username`（各最长 100 字符）；导入同时兼容 8、10、11 列旧脚本。已有元数据库升级时，先停止 bd 并确认全部在途 Spark 作业结束，在服务与 Spark 使用的同一库执行修订人增量。GaussDB 先设置正确 `search_path`，执行 `sql/add_bcomp_reviser_new.sql`；GDB/MySQL 先选择正确数据库，执行 `sql/add_bcomp_reviser_gdb.sql`。确认两个 `VARCHAR(100)` 可空列已存在后，再启动新版服务并导入脚本。增量保留原配置，旧行修订人字段为 NULL；只执行一次，部分执行后先检查列是否存在。GDB/MySQL DDL 会隐式提交，事务不能保证升级回滚。全新空库分别使用最新 `sql/create_bcomp_new.sql`、`sql/create_bcomp_gdb.sql`，无需重复执行此增量。
 
+### 恢复导出报表时升级结果结构
+
+先停止 bd 并等待在途 Spark 作业全部结束，再检查服务与 Spark 实际使用的元数据库 schema。已有库按当前结构补齐以下迁移。
+
+| 元数据库 | 完整字段统计 | 结果负责人快照 |
+|---|---|---|
+| GaussDB / PostgreSQL 兼容 | `sql/add_bcomp_field_counts_new.sql` | `sql/add_bcomp_result_reviser_new.sql` |
+| GDB / MySQL | `sql/add_bcomp_field_counts_gdb.sql` | `sql/add_bcomp_result_reviser_gdb.sql` |
+
+字段统计迁移新增 `TSS_BCOMP_FIELD_COUNT_NEW` 和结果表的 `FIELD_COUNTS_VERSION`、`FIELD_COUNTS_SIZE`。结果负责人迁移为 `TSS_BCOMP_RESULT_NEW` 增加可空的 `REVISER_NAME`、`REVISER_USERNAME`，可单独用于已经完成配置表修订人升级的环境。
+
+GaussDB 设置正确 `search_path` 后可以用下列查询检查现有列。GDB/MySQL 将 `current_schema()` 换成 `database()`。
+
+```sql
+SELECT table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = current_schema()
+  AND lower(table_name) IN ('tss_bcomp_result_new', 'tss_bcomp_field_count_new')
+ORDER BY table_name, ordinal_position;
+```
+
+每日结果表、字段组合表及领域快照应已存在，字段组合表需有 `COLLAPSED_PATTERN_COUNT`。缺失时先按字段统计脚本注释补对应数据库的前置迁移。各增量按实际结构执行一次，部分执行过的脚本应检查后只执行缺失语句。GDB/MySQL 的 DDL 会隐式提交。全新空库直接使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql` 建齐十四张表。
+
+结构升级完成后，同步替换 service、Spark JAR 和内嵌前端，再启动服务。页面右上角显示“导出报表”，按已查询日期导出全部成功结果，包含领域汇总、表明细和表字段明细。样本过期后新版全量字段统计仍可导出。历史结果缺少精确统计时会提示 `FIELD_COUNTS_UNAVAILABLE`，需用新版 Spark 重跑对应业务日期。该日期无成功结果时会提示没有可导出的结果。
+
+### 执行构建
+
 ```bash
 unzip tss-compare-source-1.0.0-SNAPSHOT.zip
 cd tss-compare-source-1.0.0-SNAPSHOT
@@ -65,15 +92,19 @@ jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
   | grep '^BOOT-INF/classes/static/index.html$'
 jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
   | grep 'BOOT-INF/lib/bes-lite-spring-boot-starter-3.x-11.5.0.004.jar'
+jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar \
+  | grep '^BOOT-INF/lib/poi-ooxml-5.3.0.jar$'
 if jar tf compare-service/target/compare-service-1.0.0-SNAPSHOT.jar | grep -E 'BOOT-INF/lib/(spring-boot-starter-tomcat|tomcat-embed)'; then
   echo 'BES 发布 JAR 中不应包含内嵌 Tomcat' >&2
   exit 1
 fi
 
 tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz
+tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz \
+  | grep -E 'sql/add_bcomp_(field_counts|result_reviser)_(new|gdb)\.sql$'
 ```
 
-第一条命令必须找到管理台首页，第二条必须找到 BES Starter，且 JAR 不应包含 Tomcat。发布包应包含服务 JAR、Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数只跳过 Node/npm，不跳过后端和 Spark 的测试。外网 `-Plocal-servlet-tests` 只用于本地测试，不能作为 BES 发布构建。
+验收输出应包含管理台首页、BES Starter、POI 5.3.0 和四个导出升级脚本。发布包还应包含 Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数会继续运行后端和 Spark 测试。外网 `-Plocal-servlet-tests` 用于本地测试，内网 BES 发布使用默认 profile。
 
 部署时在 `config/bd.env` 中填写 `TSS_METADATA_PASSWORD='ENC(...)'`。使用 `bin/encrypt-password.sh` 从终端读取元库明文密码并生成密文；加密与运行时都需由外部环境注入同一个 `JASYPT_ENCRYPTOR_PASSWORD`，不要把口令写入源码包或 `bd.env`。启动后检查 BES 的 WebServer 日志和管理台/API 实际可访问；仅通过 Maven 构建不能证明厂商容器运行兼容。
 

@@ -71,6 +71,7 @@ class NullableUniqueKeyTest {
             assertEquals(2,result.samples("3").size());
             assertEquals(2,result.samples("2").size());
             assertEquals(1,result.patternCount());
+            assertEquals(Map.of("amount",1L),result.fieldCounts());
             assertEquals("amount",result.samples("4").get(0).fields.get(0).name);
             assertEquals(1,result.samples("4").get(0).fields.size());
             assertTrue(result.samples("3").stream().allMatch(sample->sample.key.equals("[null]")));
@@ -154,6 +155,9 @@ class NullableUniqueKeyTest {
                 assertEquals("1",task.getString("TASK_RESULT"));
                 assertEquals(8,task.getLong("FILE1_ACOUNT"));
                 assertEquals(6,task.getLong("FILE2_ACOUNT"));
+            }
+            try(var counts=statement.executeQuery("SELECT FIELD_NAME,DIFFERENT_COUNT FROM TSS_BCOMP_FIELD_COUNT_NEW")) {
+                assertTrue(counts.next());assertEquals("VAL",counts.getString(1));assertEquals(1,counts.getLong(2));assertFalse(counts.next());
             }
             var mapper=new com.fasterxml.jackson.databind.ObjectMapper();
             int originSamples=0,destinationSamples=0,repeatedSamples=0;

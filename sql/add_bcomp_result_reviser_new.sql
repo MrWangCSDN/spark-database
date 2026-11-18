@@ -1,0 +1,7 @@
+-- 已有元数据库执行一次。先停止服务并确认在途 Spark 已结束。
+-- 设置与服务、Spark 相同的 search_path。
+-- 仅增加结果修订人快照；配置表已有修订人列时无需重复配置表迁移。
+BEGIN;
+ALTER TABLE TSS_BCOMP_RESULT_NEW ADD COLUMN REVISER_NAME VARCHAR(100);
+ALTER TABLE TSS_BCOMP_RESULT_NEW ADD COLUMN REVISER_USERNAME VARCHAR(100);
+COMMIT;

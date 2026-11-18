@@ -8,11 +8,13 @@
 
 ## 不变的兼容边界
 
-通过 `sql/create_bcomp_new.sql` 新建十三张空表（九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表）；旧表及数据保留。枚举、忽略值和差异字段依赖同样使用独占新表：
+通过 `sql/create_bcomp_new.sql` 新建十四张空表，包含九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表和一张完整字段统计表。枚举、忽略值和差异字段依赖同样使用独占新表。
 
 | 运行时表 | 用途 |
 |---|---|
 | `TSS_BCOMP_RESULT_NEW` | 每日全量汇总与最新成功结果版本 |
+| `TSS_BCOMP_FIELD_DIFF_NEW` | 差异字段组合及折叠统计 |
+| `TSS_BCOMP_FIELD_COUNT_NEW` | 报表使用的完整字段差异行计数 |
 | TSS_BCOMP_CONF_NEW | 核对类型、名称、分片等配置 |
 | TSS_BCOMP_DATABASE_CONFIG_NEW | 两侧连接信息及原AES密文/密钥 |
 | TSS_BCOMP_TABLE_SQL_NEW | 两侧SQL和数据库ID |
@@ -81,6 +83,8 @@ Spark 3.4.0 集群使用 `-Pspark-3.4` 构建，配套作业模块 Jackson 2.14.
 | `GET/POST/PUT /api/databases...` | 数据库连接查询、创建、修改 |
 | `POST /api/databases/test` | 测试未保存连接，不落库 |
 | `POST /api/databases/{id}/test` | 复用已保存密码或使用本次临时密码测试 |
+| `GET /api/results` | 按业务日期分页查询每日成功结果，支持领域、表名及负责人筛选 |
+| `GET /api/results/export?date=yyyyMMdd` | 下载该日期全部成功结果的 Excel 报表 |
 
 页面静态路由只覆盖管理台已知路径；`/api` 与 `/tss` 不进入 SPA 兜底。配置保存成功而进程内缓存刷新失败时，API 返回 `saved=true, cacheRefreshed=false`，页面明确提示刷新警告。
 
@@ -235,7 +239,7 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 
 批次详情按等待、运行、一致、有差异、执行失败、已取消分别展示。进度按已结束任务数计算。点击“停止批次”并确认后，当前批次等待或运行的任务进入取消状态，服务向其正在运行的 Spark 应用发送终止请求；其他批次和已完成结果不受影响。停止请求返回后仍应在 Spark 页面核实应用终态。重新发起失败项会建立新批次，保留原业务日期、每项核验日期和时点，使用当前配置，配置变化时提示；有差异及已取消任务不属于失败项，不覆盖旧任务与明细。批次保存任务名称和配置摘要，后续重新导入不影响历史列表。
 
-**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用 `sql/create_bcomp_new.sql` 一次建齐十三张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
+**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用最新 `sql/create_bcomp_new.sql` 一次建齐十四张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
 
 现有单表任务仍在 `/tasks` 查询；批次页面只展示本功能创建的批次。控制面变更在单个服务实例内串行化，当前部署按单实例运行；不要同时通过另一实例或外部 SQL 修改正在使用的配置。
 
@@ -253,3 +257,11 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 已部署环境在每日结果表已经建好的前提下，先停止 bd 并等待 Spark 作业结束，在同一个元数据库 schema 执行一次 `sql/add_bcomp_field_patterns_new.sql`，再同时替换服务与 Spark JAR。首次空库直接运行最新 `sql/create_bcomp_new.sql`，无需执行增量脚本。Axon-link 数据库升级使用其 `V76__replay_db_compare_sample_limit_default_100.sql`，只改变以后新建行的默认值，不改已有配置及历史版本。旧每日结果无法从有限样本反推完整字段组合，需按业务日期重跑后才显示组合汇总。
 
 页面“每日结果”展示连接名称和全量统计。仅一侧存在的样本直接按字段宽表展示，默认一页最多100条；字段不同按完整组合展示准确数量，默认展开差异最多的组合，在下方直接并列显示每个字段的两侧值。字段表头优先使用执行时 `FIELD_MEMO` 的中文快照，旧样本没有中文快照时显示技术字段名。样本过宽会标记截断，核对仍使用完整值；超过100条已保存样本时分页。当前部署仍按单服务实例运行；真实内网 Gauss 和 Spark 集群需要现场验收。
+
+## 每日结果报表导出恢复
+
+“每日结果”页面右上角提供“导出报表”。报表包含“领域汇总”“表明细”“表字段明细”三个 Sheet，表及字段明细包含本次成功结果的负责人快照。导出使用已查询的业务日期，包含该日期全部成功结果，页面分页和筛选条件仅影响列表。日期尚无成功结果时，点击导出会返回提示。
+
+新版 Spark 按全量字段差异行累计各字段出现次数，涵盖被折叠的字段组合，样本过期后仍可导出。历史结果有完整组合统计时可以精确回退，存在折叠或缺少完整统计时返回 `FIELD_COUNTS_UNAVAILABLE`，须用新版 Spark 重跑对应日期后导出。
+
+已有库需要补齐 `TSS_BCOMP_FIELD_COUNT_NEW`，以及结果表的 `FIELD_COUNTS_VERSION`、`FIELD_COUNTS_SIZE`、`REVISER_NAME`、`REVISER_USERNAME`。GaussDB 使用 `sql/add_bcomp_field_counts_new.sql` 和 `sql/add_bcomp_result_reviser_new.sql`，GDB/MySQL 使用对应 `_gdb.sql`。升级前检查实际结构，执行缺失的迁移，同时部署 service、Spark JAR 和内嵌前端。新建库直接使用最新完整建表脚本。操作顺序见 [内网源码构建说明](docs/migration/intranet-build.md)。

@@ -23,6 +23,7 @@
     <gauss-jdbc.version>6.0.0-htrunk8</gauss-jdbc.version>
     <bes-spring-starter.version>3.x-11.5.0.004</bes-spring-starter.version>
     <jasypt.version>3.0.5</jasypt.version>
+    <poi.version>5.3.0</poi.version>
   </properties>
   <profiles>
     <profile>

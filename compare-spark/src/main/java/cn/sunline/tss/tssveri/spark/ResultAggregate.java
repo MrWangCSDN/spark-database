@@ -1,6 +1,7 @@
 package cn.sunline.tss.tssveri.spark;
 
 import java.io.Serializable;
+import java.math.BigInteger;
 import java.util.*;
 import java.util.function.Supplier;
 
@@ -11,6 +12,7 @@ public class ResultAggregate implements Serializable {
     public long matched, onlyOrigin, onlyDestination, different;
     private final TreeMap<String,SampleRow> origin=new TreeMap<>(),destination=new TreeMap<>(),changed=new TreeMap<>();
     private final TreeMap<String,PatternStats> patterns=new TreeMap<>();
+    private final TreeMap<String,Long> fieldCounts=new TreeMap<>();
     private final Set<String> retainedPatternIds;
     private final int patternSampleLimit;
     private PatternStats collapsed;
@@ -49,6 +51,10 @@ public class ResultAggregate implements Serializable {
         Supplier<SampleRow> sample=()->{ if(cached[0]==null) cached[0]=factory.get();return cached[0]; };
         PatternStats stats=null;
         if("4".equals(type)) {
+            for(String field:new HashSet<>(differingFields)) {
+                requireFieldName(field);
+                fieldCounts.merge(field,occurrences,Math::addExact);
+            }
             FieldPattern pattern=new FieldPattern(differingFields);
             if(retainedPatternIds==null||retainedPatternIds.contains(pattern.id)) {
                 stats=patterns.get(pattern.id);
@@ -71,6 +77,7 @@ public class ResultAggregate implements Serializable {
         if(collapsed!=null||other.collapsed!=null) throw new IllegalStateException("折叠组合只能在聚合完成后注入");
         matched=Math.addExact(matched,other.matched);onlyOrigin=Math.addExact(onlyOrigin,other.onlyOrigin);
         onlyDestination=Math.addExact(onlyDestination,other.onlyDestination);different=Math.addExact(different,other.different);
+        other.fieldCounts.forEach((field,count)->fieldCounts.merge(field,count,Math::addExact));
         for(String type:List.of("2","3","4")) {
             TreeMap<String,SampleRow> target=map(type);
             other.map(type).forEach((key,value)->{ if(eligible(target,key,limit)) put(target,key,limit,value); });
@@ -104,6 +111,23 @@ public class ResultAggregate implements Serializable {
         return switch(type) { case "2" -> destination;case "3" -> origin;case "4" -> changed;default -> throw new IllegalArgumentException("未知差异类型"); };
     }
     List<SampleRow> samples(String type) { return new ArrayList<>(map(type).values()); }
+    Map<String,Long> fieldCounts() { return Collections.unmodifiableMap(new TreeMap<>(fieldCounts)); }
+    void validateFieldCounts() {
+        if(different<0) throw new IllegalArgumentException("字段差异总数不能为负数");
+        BigInteger covered=BigInteger.ZERO;
+        for(var entry:fieldCounts.entrySet()) {
+            requireFieldName(entry.getKey());
+            long count=entry.getValue();
+            if(count<=0||count>different) throw new IllegalArgumentException("字段差异计数超出有效范围");
+            covered=covered.add(BigInteger.valueOf(count));
+        }
+        if(covered.compareTo(BigInteger.valueOf(different))<0)
+            throw new IllegalArgumentException("字段差异计数未覆盖全部差异行");
+    }
+    private static void requireFieldName(String field) {
+        if(field==null||field.isBlank()||field.length()>100)
+            throw new IllegalArgumentException("差异字段名称不能为空或超过100字符");
+    }
     List<PatternStats> patterns() { var result=new ArrayList<>(patterns.values());if(collapsed!=null) result.add(collapsed);return result; }
     int patternSampleCount() { return patterns.values().stream().mapToInt(PatternStats::sampleCount).sum(); }
     long patternCount() { long count=0;for(var stats:patterns.values()) count=Math.addExact(count,stats.count);return collapsed==null?count:Math.addExact(count,collapsed.count); }

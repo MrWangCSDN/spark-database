@@ -44,6 +44,12 @@ class PatternOverflowPipelineTest {
             assertEquals(127,result.patterns().stream().filter(pattern->!"__OTHER__".equals(pattern.id)).count());
             assertEquals(1,result.patterns().stream().filter(pattern->"__OTHER__".equals(pattern.id)).count());
             assertEquals(130,result.patternCount());
+            var expectedFields=new TreeMap<String,Long>();
+            for(int pattern=1;pattern<=130;pattern++) {
+                for(int bit=0;bit<8;bit++) if((pattern&(1<<bit))!=0) expectedFields.merge("f"+bit,1L,Long::sum);
+            }
+            assertEquals(expectedFields,result.fieldCounts());
+            result.validateFieldCounts();
             assertEquals(result.different,result.patternCount());
             assertEquals(0,result.patterns().stream().filter(pattern->"__OTHER__".equals(pattern.id)).findFirst().orElseThrow().sampleCount());
             assertEquals(StorageLevel.NONE(),cached.getStorageLevel());

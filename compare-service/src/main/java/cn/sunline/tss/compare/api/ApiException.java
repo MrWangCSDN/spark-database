@@ -40,4 +40,7 @@ public class ApiException extends RuntimeException {
     public static ApiException unprocessable(String code, String message, Throwable cause) {
         return new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, code, message, cause);
     }
+    public static ApiException internal(String code, String message, Throwable cause) {
+        return new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, code, message, cause);
+    }
 }
