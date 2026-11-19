@@ -94,8 +94,9 @@ public class SparkHandlerTable {
     public static void SparkRun(String[] args) throws Exception {
         log.info("spark任务开始执行");
 
-        OpenGaussJdbcDialect.register();
-        SparkSession sc = SparkSession.builder()
+        String applicationId="unavailable";
+        Throwable handledFailure=null;
+        try (SparkSession sc = SparkSession.builder()
                 .appName(args[0])
                 // 基础内存优化：启用Kryo序列化（比默认Java序列化更省内存）
                 // 注：曾怀疑Kryo在shuffle反序列化时把同键多行压成雷同内容，经分组摘要与源表快照比对已排除——
@@ -114,101 +115,117 @@ public class SparkHandlerTable {
                 .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
                 // AQE优化：建议分区大小为64MB，适合有限资源场景
                 .config("spark.sql.adaptive.advisoryPartitionSizeInBytes", "64m")
-                .getOrCreate();
-        GdbJdbcDialect.register(sc.conf().get("spark.gdb.jdbc-url-prefixes", "jdbc:mysql:,jdbc:gdb:,jdbc:gbase:"));
+                .getOrCreate()) {
+            try {
+                applicationId=sc.sparkContext().applicationId();
+                OpenGaussJdbcDialect.register();
+                GdbJdbcDialect.register(sc.conf().get("spark.gdb.jdbc-url-prefixes", "jdbc:mysql:,jdbc:gdb:,jdbc:gbase:"));
 
-        Class.forName(args[tssDataSourceDriver]);
-        try (Connection connectionOut=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-            int limit=readSampleLimit(connectionOut,Long.parseLong(args[bcompIndex]),sc.conf().get("spark.compare.detailLimit","100"));
-            DailyResultPublisher.Context resultContext=DailyResultPublisher.context(connectionOut,Long.parseLong(args[bcompIndex]));
-            //获取tssBcompField字段信息（需在获取数据源配置之前，因为分区列从field表中读取）
-            List<Row> tssBcompFieldDataRows = getTssBcompFieldData(sc,args);
+                Class.forName(args[tssDataSourceDriver]);
+                try (Connection connectionOut=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                    int limit=readSampleLimit(connectionOut,Long.parseLong(args[bcompIndex]),sc.conf().get("spark.compare.detailLimit","100"));
+                    DailyResultPublisher.Context resultContext=DailyResultPublisher.context(connectionOut,Long.parseLong(args[bcompIndex]));
+                    //获取tssBcompField字段信息（需在获取数据源配置之前，因为分区列从field表中读取）
+                    List<Row> tssBcompFieldDataRows = getTssBcompFieldData(sc,args);
 
-            //替换SQL中的${HDRQ}占位符（使用核对日期args[compDateIndex]）
-            String sqlDateParam = DailyResultPublisher.resultDate(args);
-            if (sqlDateParam != null && !sqlDateParam.isEmpty()) {
-                args[OLD_TABLE_INDEX] = replaceSqlPlaceholders(args[OLD_TABLE_INDEX], sqlDateParam);
-                args[NEW_TABLE_INDEX] = replaceSqlPlaceholders(args[NEW_TABLE_INDEX], sqlDateParam);
-                log.info("SQL占位符替换完成，核对日期: {}", sqlDateParam);
-            }
-
-            boolean matchByName=Boolean.parseBoolean(sc.conf().get("spark.compare.fieldMatchByName","true"));
-            var classSource=SparkHandlerTable.class.getProtectionDomain().getCodeSource();
-            log.info("字段匹配模式={}, 作业类来源={}",matchByName?"NAME":"POSITION",classSource==null?"unknown":classSource.getLocation());
-            Class.forName(args[OLD_DRIVER_INDEX]);
-            try(Connection connection=DriverManager.getConnection(args[OLD_URL_INDEX],args[OLD_USER_INDEX],args[OLD_PASSWORD_INDEX])) {
-                tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[OLD_TABLE_INDEX],tssBcompFieldDataRows,
-                    FIELD_OLD_INDEX,"数据库A（源）",matchByName);
-            }
-            Class.forName(args[NEW_DRIVER_INDEX]);
-            try(Connection connection=DriverManager.getConnection(args[NEW_URL_INDEX],args[NEW_USER_INDEX],args[NEW_PASSWORD_INDEX])) {
-                tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[NEW_TABLE_INDEX],tssBcompFieldDataRows,
-                    FIELD_NEW_INDEX,"数据库B（目标）",matchByName);
-            }
-
-            //先校验两侧业务键，避免无效配置触发大表计数。
-            PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_OLD_INDEX);
-            PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_NEW_INDEX);
-            //实时统计两侧本次 SQL 的行数，自动选择相同的 HASH 分区数。
-            ShardConf shardConf = new ShardConf(AutoHashPartitionPlanner.plan(args));
-            //按所有主键字段构造HASH读取计划；失败直接终止
-            ReadPlan readPlan = resolveReadPlan(args, tssBcompFieldDataRows, shardConf);
-            //回写实际读取策略到TSS_BCOMP_TASK_NEW.BCOMP_READ_MODE，运维可见实际分区数（列不存在时只告警）
-            writeReadMode(connectionOut, readPlan, args);
-
-            //枚举/忽略值改为executor分区内自加载：这两张表可能是数据级规模(如按账号/流水号配置忽略值)，
-            //Driver端collect+广播会直接撑爆Driver堆；这里只提取配置中用到的索引(几个整数)传给executor
-            String enumIndexCsv = tssBcompFieldDataRows.stream()
-                    .filter(row -> enumFieldType.equals((String) row.getAs("FIELD_TYPE")))
-                    .map(row -> row.getAs("FIELD_ENUM_INDEX"))
-                    .filter(Objects::nonNull)
-                    .map(v -> String.valueOf(((Number) v).intValue()))
-                    .distinct()
-                    .collect(Collectors.joining(","));
-            String ignoreIdCsv = tssBcompFieldDataRows.stream()
-                    .map(row -> row.getAs("FIELD_IGNORE_VALUE"))
-                    .filter(v -> StringUtils.isNotEmpty((String) v))
-                    .map(v -> ((String) v).trim())
-                    .distinct()
-                    .collect(Collectors.joining(","));
-
-            //字段配置改为广播变量（仅几十行定义，不构成Driver内存压力）
-            JavaSparkContext jsc = new JavaSparkContext(sc.sparkContext());
-            Broadcast<List<Row>> bcField = jsc.broadcast(tssBcompFieldDataRows);
-
-            //分别查询新老数据库表信息
-            //只触发一次比对行动；完整统计与有界样本一起归约。
-            JavaRDD<Row> rowJavaRDDOld = readSide(sc, readPlan.oldSide);
-            JavaRDD<Row> rowJavaRDDNew = readSide(sc, readPlan.newSide);
-            //转换为pairRDD
-            JavaPairRDD<String, CountedRow> pairsOra = RddToPair(FIELD_OLD_INDEX,rowJavaRDDOld,bcField);
-            JavaPairRDD<String, CountedRow> pairsYjj = RddToPair(FIELD_NEW_INDEX,rowJavaRDDNew,bcField);
-            //采用cogroup进行join
-            JavaPairRDD<String, Tuple2<Iterable<CountedRow>, Iterable<CountedRow>>> rsCogroup = pairsOra.cogroup(pairsYjj);
-
-            ResultAggregate result=runTwoPass(rsCogroup,limit,tuple -> {
-                    Class.forName(args[tssDataSourceDriver]);
-                    try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-                        return countPatternsPartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv));
+                    //替换SQL中的${HDRQ}占位符（使用核对日期args[compDateIndex]）
+                    String sqlDateParam = DailyResultPublisher.resultDate(args);
+                    if (sqlDateParam != null && !sqlDateParam.isEmpty()) {
+                        args[OLD_TABLE_INDEX] = replaceSqlPlaceholders(args[OLD_TABLE_INDEX], sqlDateParam);
+                        args[NEW_TABLE_INDEX] = replaceSqlPlaceholders(args[NEW_TABLE_INDEX], sqlDateParam);
+                        log.info("SQL占位符替换完成，核对日期: {}", sqlDateParam);
                     }
-                },(tuple,selection) -> {
-                    Class.forName(args[tssDataSourceDriver]);
-                    try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-                        return comparePartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv),
-                            limit,selection.retainedIds(),selection.patternSampleLimit());
+
+                    boolean matchByName=Boolean.parseBoolean(sc.conf().get("spark.compare.fieldMatchByName","true"));
+                    var classSource=SparkHandlerTable.class.getProtectionDomain().getCodeSource();
+                    log.info("字段匹配模式={}, 作业类来源={}",matchByName?"NAME":"POSITION",classSource==null?"unknown":classSource.getLocation());
+                    Class.forName(args[OLD_DRIVER_INDEX]);
+                    try(Connection connection=DriverManager.getConnection(args[OLD_URL_INDEX],args[OLD_USER_INDEX],args[OLD_PASSWORD_INDEX])) {
+                        tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[OLD_TABLE_INDEX],tssBcompFieldDataRows,
+                            FIELD_OLD_INDEX,"数据库A（源）",matchByName);
                     }
-                });
-            DailyResultPublisher.publish(connectionOut,args,resultContext,result);
-        } catch(Exception error) {
-            try(Connection c=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
-                PreparedStatement ps=c.prepareStatement("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='4',TASK_RESULT='3',FTASK_REASON=?,END_DATETIME=? WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=? AND BCOMP_TIME_NODE=? AND TASK_STATE='2'")) {
-                String reason=error instanceof QueryFieldResolver.FieldResolutionException
-                    ?error.getMessage():"核对失败（"+error.getClass().getSimpleName()+"），请检查Spark日志";
-                ps.setString(1,reason);
-                ps.setString(2,getDateTime());ps.setLong(3,Long.parseLong(args[bcompIndex]));ps.setString(4,args[taskBusiDate]);ps.setString(5,args[taskBusiBatch]);ps.setString(6,args[bcompTimeNode]);ps.executeUpdate();
-            } catch(Exception updateError) { error.addSuppressed(updateError); }
+                    Class.forName(args[NEW_DRIVER_INDEX]);
+                    try(Connection connection=DriverManager.getConnection(args[NEW_URL_INDEX],args[NEW_USER_INDEX],args[NEW_PASSWORD_INDEX])) {
+                        tssBcompFieldDataRows=QueryFieldResolver.resolve(connection,args[NEW_TABLE_INDEX],tssBcompFieldDataRows,
+                            FIELD_NEW_INDEX,"数据库B（目标）",matchByName);
+                    }
+
+                    //先校验两侧业务键，避免无效配置触发大表计数。
+                    PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_OLD_INDEX);
+                    PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_NEW_INDEX);
+                    //实时统计两侧本次 SQL 的行数，自动选择相同的 HASH 分区数。
+                    ShardConf shardConf = new ShardConf(AutoHashPartitionPlanner.plan(args));
+                    //按所有主键字段构造HASH读取计划；失败直接终止
+                    ReadPlan readPlan = resolveReadPlan(args, tssBcompFieldDataRows, shardConf);
+                    //回写实际读取策略到TSS_BCOMP_TASK_NEW.BCOMP_READ_MODE，运维可见实际分区数（列不存在时只告警）
+                    writeReadMode(connectionOut, readPlan, args);
+
+                    //枚举/忽略值改为executor分区内自加载：这两张表可能是数据级规模(如按账号/流水号配置忽略值)，
+                    //Driver端collect+广播会直接撑爆Driver堆；这里只提取配置中用到的索引(几个整数)传给executor
+                    String enumIndexCsv = tssBcompFieldDataRows.stream()
+                            .filter(row -> enumFieldType.equals((String) row.getAs("FIELD_TYPE")))
+                            .map(row -> row.getAs("FIELD_ENUM_INDEX"))
+                            .filter(Objects::nonNull)
+                            .map(v -> String.valueOf(((Number) v).intValue()))
+                            .distinct()
+                            .collect(Collectors.joining(","));
+                    String ignoreIdCsv = tssBcompFieldDataRows.stream()
+                            .map(row -> row.getAs("FIELD_IGNORE_VALUE"))
+                            .filter(v -> StringUtils.isNotEmpty((String) v))
+                            .map(v -> ((String) v).trim())
+                            .distinct()
+                            .collect(Collectors.joining(","));
+
+                    //字段配置改为广播变量（仅几十行定义，不构成Driver内存压力）
+                    JavaSparkContext jsc = new JavaSparkContext(sc.sparkContext());
+                    Broadcast<List<Row>> bcField = jsc.broadcast(tssBcompFieldDataRows);
+
+                    //分别查询新老数据库表信息
+                    //只触发一次比对行动；完整统计与有界样本一起归约。
+                    JavaRDD<Row> rowJavaRDDOld = readSide(sc, readPlan.oldSide);
+                    JavaRDD<Row> rowJavaRDDNew = readSide(sc, readPlan.newSide);
+                    //转换为pairRDD
+                    JavaPairRDD<String, CountedRow> pairsOra = RddToPair(FIELD_OLD_INDEX,rowJavaRDDOld,bcField);
+                    JavaPairRDD<String, CountedRow> pairsYjj = RddToPair(FIELD_NEW_INDEX,rowJavaRDDNew,bcField);
+                    //采用cogroup进行join
+                    JavaPairRDD<String, Tuple2<Iterable<CountedRow>, Iterable<CountedRow>>> rsCogroup = pairsOra.cogroup(pairsYjj);
+
+                    ResultAggregate result=runTwoPass(rsCogroup,limit,tuple -> {
+                            Class.forName(args[tssDataSourceDriver]);
+                            try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                                return countPatternsPartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv));
+                            }
+                        },(tuple,selection) -> {
+                            Class.forName(args[tssDataSourceDriver]);
+                            try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                                return comparePartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv),
+                                    limit,selection.retainedIds(),selection.patternSampleLimit());
+                            }
+                        });
+                    DailyResultPublisher.publish(connectionOut,args,resultContext,result);
+                }
+            } catch(Exception | Error error) {
+                handledFailure=error;
+                recordTaskFailure(args,error);
+                throw error;
+            }
+        } catch(Exception | Error error) {
+            if(error!=handledFailure) recordTaskFailure(args,error);
+            log.error("库表核对失败 applicationId={}, diagnostic={}",applicationId,SparkFailureDiagnostics.summary(error));
             throw error;
-        } finally { sc.close(); }
+        }
+    }
+
+    private static void recordTaskFailure(String[] args,Throwable error) {
+        try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
+            PreparedStatement statement=connection.prepareStatement("UPDATE TSS_BCOMP_TASK_NEW SET TASK_STATE='4',TASK_RESULT='3',FTASK_REASON=?,END_DATETIME=? WHERE BCOMP_INDEX=? AND TASK_BUSI_DATE=? AND TASK_BATCH=? AND BCOMP_TIME_NODE=? AND TASK_STATE='2'")) {
+            statement.setString(1,SparkFailureDiagnostics.summary(error));
+            statement.setString(2,getDateTime());statement.setLong(3,Long.parseLong(args[bcompIndex]));
+            statement.setString(4,args[taskBusiDate]);statement.setString(5,args[taskBusiBatch]);statement.setString(6,args[bcompTimeNode]);
+            statement.executeUpdate();
+        } catch(Exception | Error updateError) {
+            if(updateError!=error) error.addSuppressed(updateError);
+        }
     }
 
     static ResultAggregate comparePartition(Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups,

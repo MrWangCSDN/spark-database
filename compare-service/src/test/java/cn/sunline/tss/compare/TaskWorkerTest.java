@@ -118,13 +118,19 @@ class TaskWorkerTest {
         } finally { finish.countDown(); pool.shutdownNow(); }
     }
     @Test void stopInterruptsOverdueJobAndDoesNotClaimAnotherTask() throws Exception {
-        addTask("1"); addTask("2"); var started=new CountDownLatch(1);
-        env.withProperty("tssveritask.executor.thread.enable","true")
-            .withProperty("tssveritask.executor.thread.awaitTerminationSeconds","0");
-        start(args -> { started.countDown(); new CountDownLatch(1).await(); });
-        assertThat(started.await(3,TimeUnit.SECONDS)).isTrue();
-        worker.stop();
-        assertThat(worker.status()).isEqualTo("0");
-        assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK_NEW",String.class)).containsExactlyInAnyOrder("4","1");
+        var logger=(Logger)LoggerFactory.getLogger(TaskWorker.class);var events=new ListAppender<ILoggingEvent>();events.start();logger.addAppender(events);
+        try {
+            addTask("1"); addTask("2"); var started=new CountDownLatch(1);
+            env.withProperty("tssveritask.executor.thread.enable","true")
+                .withProperty("tssveritask.executor.thread.awaitTerminationSeconds","0");
+            start(args -> { started.countDown(); new CountDownLatch(1).await(); });
+            assertThat(started.await(3,TimeUnit.SECONDS)).isTrue();
+            worker.stop();
+            assertThat(worker.status()).isEqualTo("0");
+            assertThat(jdbc.queryForList("select TASK_STATE from TSS_BCOMP_TASK_NEW",String.class)).containsExactlyInAnyOrder("4","1");
+            assertThat(events.list.stream().map(ILoggingEvent::getFormattedMessage))
+                .anySatisfy(message->assertThat(message).contains("停止任务执行器","graceSeconds=0"))
+                .anySatisfy(message->assertThat(message).contains("正在中断运行线程","graceSeconds=0"));
+        } finally { logger.detachAppender(events); }
     }
 }

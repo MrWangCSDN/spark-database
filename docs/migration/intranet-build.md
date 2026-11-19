@@ -77,6 +77,16 @@ findmnt -T "$spark_dir"
 
 核对可用容量、inode 及挂载点，结合任务执行时的峰值占用判断容量。磁盘总容量 600 GB 仍需结合该节点实际剩余空间、缓存行宽、压缩率和并发任务评估。
 
+## Spark 失败与退出原因
+
+服务提交日志会记录任务编号、任务日期、批次、时点、application ID 及实际超时秒数。`compare.spark-timeout-seconds=0` 表示等待 Spark 终态，正数表示本次提交的等待上限。超时配置在创建子进程前解析。
+
+主动终止前，服务日志记录固定原因 `BATCH_CANCELLED`、`WAIT_TIMEOUT` 或 `WAIT_INTERRUPTED`，并关联 application ID 或批次。服务停止时会先记录等待运行中任务的宽限秒数，超出宽限后记录中断等待线程的事件。部署重启及停止批次都应结合这些日志核对。
+
+任务失败详情保留已识别的磁盘空间耗尽、内存不足及数组下标越界等固定诊断，字段名称解析失败继续显示对应字段提示。未知失败显示有界异常类型链，异常消息中的 SQL、业务值和连接参数沿保密规则处理。Spark 正文执行失败时先保存主异常原因，再关闭 SparkContext。关闭异常作为附加异常保留在最终安全日志及重抛异常中。
+
+Executor 的 `Driver commanded a shutdown`、`disconnected during shutdown` 和 `RECEIVED SIGNAL TERM` 记录退出阶段。定位时，先按 application ID 对齐服务端的主动终止原因，再查看 Driver 的首个异常和任务失败详情。Spark Launcher 通知 `FINISHED` 后，服务还会检查任务表的发布结果是否完整。
+
 ## 构建与验收
 
 现场 Spark 为 3.4.0 时，在源码根目录使用以下入口，`spark-3.4` 同时选择匹配的 Spark 3.4.0 和作业模块 Jackson 2.14.2。

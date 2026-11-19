@@ -90,14 +90,21 @@ public class TaskWorker implements SmartLifecycle {
     }
     @Override public synchronized void stop() {
         running=false; status="3";
+        log.info("任务执行器进入停止状态");
         if(executor!=null) {
             executor.shutdown();
+            long graceSeconds=env.getProperty("tssveritask.executor.thread.awaitTerminationSeconds",Long.class,60L);
+            log.info("停止任务执行器，等待在途任务 graceSeconds={}",graceSeconds);
             try {
-                if(!executor.awaitTermination(env.getProperty("tssveritask.executor.thread.awaitTerminationSeconds",Long.class,60L),TimeUnit.SECONDS)) {
+                if(!executor.awaitTermination(graceSeconds,TimeUnit.SECONDS)) {
+                    log.warn("任务执行器关闭宽限已到，正在中断运行线程 graceSeconds={}",graceSeconds);
                     executor.shutdownNow();
                     executor.awaitTermination(10,TimeUnit.SECONDS);
                 }
-            } catch(InterruptedException e) { executor.shutdownNow(); Thread.currentThread().interrupt(); }
+            } catch(InterruptedException e) {
+                log.warn("停止任务执行器的等待被中断，正在中断运行线程 graceSeconds={}",graceSeconds);
+                executor.shutdownNow(); Thread.currentThread().interrupt();
+            }
         }
         status="0";
     }

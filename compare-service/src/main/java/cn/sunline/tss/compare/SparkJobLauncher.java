@@ -19,6 +19,7 @@ public class SparkJobLauncher implements JobLauncher {
     @Override public void cancelBatch(String batchId) {
         cancelledBatches.add(batchId);
         for(SparkAppHandle handle:activeByBatch.getOrDefault(batchId,Set.of())) {
+            log.warn("请求终止Spark作业 reason=BATCH_CANCELLED, application={}, batch={}",handle.getAppId(),batchId);
             try { handle.kill(); }
             catch(RuntimeException error) { log.warn("无法终止批次 {} 的 Spark 应用，需检查集群应用终态",batchId); }
         }
@@ -31,7 +32,12 @@ public class SparkJobLauncher implements JobLauncher {
         String mainClass=tableMainClass(env.getProperty("spark_mainClass","cn.sunline.tss.tssveri.spark.SparkHandlerTable"));
         SparkJobArtifact artifact=SparkJobArtifact.inspect(env.getRequiredProperty("app_resource"),mainClass,matchByName);
         String matchMode=matchByName?"NAME":"POSITION";
-        log.info("提交Spark作业 resource={}, sha256={}, main={}, fieldMatch={}",artifact.path(),artifact.sha256(),mainClass,matchMode);
+        long timeoutSeconds=env.getProperty("compare.spark-timeout-seconds",Long.class,0L);
+        String taskIndex=args[6];
+        String date=args[7];
+        String timeNode=args[9];
+        log.info("提交Spark作业 resource={}, sha256={}, main={}, fieldMatch={}, taskIndex={}, date={}, batch={}, timeNode={}, timeoutSeconds={}",
+            artifact.path(),artifact.sha256(),mainClass,matchMode,taskIndex,date,batchId,timeNode,timeoutSeconds);
         Map<String,String> childEnv=new HashMap<>();
         String hadoop=env.getProperty("hadoop_conf_dir");
         if(hadoop!=null && !hadoop.isBlank()) childEnv.put("HADOOP_CONF_DIR",hadoop);
@@ -69,7 +75,8 @@ public class SparkJobLauncher implements JobLauncher {
         var finished=new CountDownLatch(1);
         SparkAppHandle handle=launcher.startApplication(new SparkAppHandle.Listener() {
             @Override public void stateChanged(SparkAppHandle app) {
-                log.info("Spark application={}, state={}, sha256={}, fieldMatch={}",app.getAppId(),app.getState(),artifact.sha256(),matchMode);
+                log.info("Spark application={}, state={}, sha256={}, fieldMatch={}, taskIndex={}, date={}, batch={}, timeNode={}, timeoutSeconds={}",
+                    app.getAppId(),app.getState(),artifact.sha256(),matchMode,taskIndex,date,batchId,timeNode,timeoutSeconds);
                 if(app.getState().isFinal()) finished.countDown();
             }
             @Override public void infoChanged(SparkAppHandle app) { }
@@ -77,15 +84,22 @@ public class SparkJobLauncher implements JobLauncher {
         activeByBatch.computeIfAbsent(batchId,unused -> ConcurrentHashMap.newKeySet()).add(handle);
         try {
             if(cancelledBatches.contains(batchId)) {
+                log.warn("请求终止Spark作业 reason=BATCH_CANCELLED, application={}, taskIndex={}, date={}, batch={}, timeNode={}, timeoutSeconds={}",
+                    handle.getAppId(),taskIndex,date,batchId,timeNode,timeoutSeconds);
                 handle.kill();
                 throw new CancellationException("批次已停止");
             }
-            long timeout=env.getProperty("compare.spark-timeout-seconds",Long.class,0L);
-            if(timeout>0) {
-                if(!finished.await(timeout,TimeUnit.SECONDS)) throw new TimeoutException("Spark作业超过配置时限");
+            if(timeoutSeconds>0) {
+                if(!finished.await(timeoutSeconds,TimeUnit.SECONDS)) throw new TimeoutException("Spark作业超过配置时限");
             } else finished.await();
             if(handle.getState()!=SparkAppHandle.State.FINISHED) throw new IllegalStateException("Spark终态="+handle.getState());
-        } catch(InterruptedException | TimeoutException e) {
+        } catch(InterruptedException e) {
+            log.warn("请求终止Spark作业 reason=WAIT_INTERRUPTED, application={}, taskIndex={}, date={}, batch={}, timeNode={}, timeoutSeconds={}",
+                handle.getAppId(),taskIndex,date,batchId,timeNode,timeoutSeconds);
+            handle.kill(); throw e;
+        } catch(TimeoutException e) {
+            log.warn("请求终止Spark作业 reason=WAIT_TIMEOUT, application={}, taskIndex={}, date={}, batch={}, timeNode={}, timeoutSeconds={}",
+                handle.getAppId(),taskIndex,date,batchId,timeNode,timeoutSeconds);
             handle.kill(); throw e;
         } finally {
             activeByBatch.getOrDefault(batchId,Set.of()).remove(handle);
