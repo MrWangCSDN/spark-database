@@ -63,6 +63,20 @@ javap -classpath "$job_jar" -p cn.sunline.tss.tssveri.spark.SparkHandlerTable \
 
 旧 Axon 配置可能未填写日期模式，页面显示“未指定”。保存兼容修复允许保留此空值并调整最大 HASH 分区数，不强制改成“同日”，原任务核对日期推导保持不变。已完成上限升级的环境，本次日期模式校验修复只需重新构建并更新 bd 服务 JAR，无新增 SQL；无需重跑已执行的上限增量。非空日期模式仍只允许 `1` 或 `2`。
 
+## Spark 长任务元库连接修复
+
+本次改造让 Driver 配置读取、读取策略回写、结果发布各使用独立短连接，COUNT 与两遍计算之间不保留旧的 Driver 元数据库连接。发布连接在计算结束后才创建，原发布事务只执行一次；事务开始后或提交结果不明时不会自动重连重放。此改造移除旧连接长时间闲置后被复用的风险，不能替代现场数据库/网络断链原因确认。
+
+已完成前述版本升级的环境，本次只需更新 Spark 作业 JAR，无新增 DDL，无需重跑已执行的分区上限增量。服务、前端、密码配置及 JDBC 驱动版本沿用现场设置。Spark 3.4.0 可在源码根目录用 JDK17 单独构建作业：
+
+```bash
+mvn -pl compare-spark -Pspark-3.4 clean package
+```
+
+构建仍需内网 Maven 镜像提供原有依赖。停止领取新任务并等待全部在途 Spark 作业结束，备份当前实际 `app_resource` 指向的 JAR，再替换为本次 `compare-spark/target/compare-spark-1.0.0-SNAPSHOT.jar`；保持现有驱动路径，恢复服务后按失败业务日期重新发起核对。对齐提交日志中的 JAR SHA-256 和 Driver 类来源，确认实际使用新版。仅修改服务 Hikari 连接池或提高分区数不能改变旧 Spark Driver 的连接生命周期。
+
+失败日志现在提供固定 `phase` 和合法 `SQLSTATE`。`PUBLISH` 阶段的 08 类 SQLState 应结合数据库日志、主备切换和网络设备记录定位；原始 SQL、密码和业务值继续不输出。`FINISHED` 只代表 Spark 应用状态，任务详情仍以元库中的原子发布状态为准。
+
 ## Spark 本地磁盘配置
 
 新版服务会将应用配置中的非空 `spark.local.dir` 传入 Spark 提交命令，支持含空格路径及逗号分隔的多个目录。缺失或空白时由 Spark 自身配置选择目录。可在部署的 `config/application-local.properties` 中设置以下属性，将示例路径替换为实际的大磁盘目录。

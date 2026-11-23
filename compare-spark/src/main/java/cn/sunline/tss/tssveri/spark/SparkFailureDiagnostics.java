@@ -2,6 +2,7 @@ package cn.sunline.tss.tssveri.spark;
 
 import java.io.IOException;
 import java.nio.file.FileSystemException;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -14,6 +15,7 @@ final class SparkFailureDiagnostics {
     private static final int SUMMARY_LIMIT=500;
     private static final int CAUSE_LIMIT=8;
     private static final int SUPPRESSED_LIMIT=3;
+    private static final Pattern SQL_STATE=Pattern.compile("[0-9A-Z]{5}");
     private static final Pattern DISK_FULL=Pattern.compile("(?i)(?:^|[\\s:(])(?:ENOSPC|No space left on device)(?=$|[\\s):.,])");
 
     private SparkFailureDiagnostics() {}
@@ -51,6 +53,10 @@ final class SparkFailureDiagnostics {
             if(!first) value.append(" -> ");
             first=false;
             value.append(cause.getClass().getSimpleName());
+            if(cause instanceof SQLException sqlFailure) {
+                String state=sqlFailure.getSQLState();
+                if(state!=null&&SQL_STATE.matcher(state).matches()) value.append(" [SQLSTATE=").append(state).append(']');
+            }
             if(includeFieldMessage&&cause instanceof QueryFieldResolver.FieldResolutionException) {
                 String message=cause.getMessage();
                 if(message!=null) value.append("（").append(message.replace('\n',' ').replace('\r',' ')).append("）");
