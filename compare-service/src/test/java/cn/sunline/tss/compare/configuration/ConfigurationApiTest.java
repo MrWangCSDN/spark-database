@@ -88,6 +88,40 @@ class ConfigurationApiTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(64));
     }
 
+    @Test void savesTablePartitionLimitWhenLegacyDateModeIsUnspecified() throws Exception {
+        var mvc=mvc(()->{});
+        String[] modes={null,""," "};
+        for(int offset=0;offset<modes.length;offset++) {
+            long index=226+offset;
+            String mode=modes[offset];
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(index,"legacy")))
+                .andExpect(status().isCreated());
+            jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_DATE_MODE=? WHERE BCOMP_INDEX=?",mode,index);
+            // Save the detail response exactly as the editor does, changing only the cap.
+            String response=mvc.perform(get("/api/configurations/"+index)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+            var body=(com.fasterxml.jackson.databind.node.ObjectNode)new com.fasterxml.jackson.databind.ObjectMapper().readTree(response);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)body.get("basic")).put("maxPartitionNum",256);
+            mvc.perform(put("/api/configurations/"+index).contentType(APPLICATION_JSON).content(body.toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(256));
+            assertThat(jdbc.queryForObject("SELECT BCOMP_DATE_MODE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?",String.class,index)).isEqualTo(mode);
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?",Integer.class,index)).isEqualTo(256);
+        }
+    }
+
+    @Test void rejectsUnsupportedNonBlankDateModeWithoutChangingThePartitionLimit() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(226,"original")))
+            .andExpect(status().isCreated());
+        for(String mode:new String[]{"0","3","invalid"}) {
+            String body=withLimit(valid(226,"invalid"),"256").replace("\"dateMode\":\"2\"","\"dateMode\":\""+mode+"\"");
+            mvc.perform(put("/api/configurations/226").contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIGURATION"));
+        }
+        assertThat(jdbc.queryForObject("SELECT BCOMP_DATE_MODE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=226",String.class)).isEqualTo("2");
+        assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=226",Integer.class)).isEqualTo(64);
+    }
+
     @Test void rejectsInvalidLimitJsonWithoutSavingOrRefreshing() throws Exception {
         var reloads=new AtomicInteger();var mvc=mvc(reloads::incrementAndGet);
         for(String token:new String[]{"0","257","-1","64.0","64.5","1e2","\"64\"","true","false","[]","{}","2147483648","-2147483649","999999999999999999999999"}) {

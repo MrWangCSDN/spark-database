@@ -87,7 +87,8 @@ public class ConfigurationService {
         if(command==null||command.basic()==null||command.tableSql()==null||command.fields()==null||command.fields().isEmpty())throw ApiException.badRequest("INVALID_CONFIGURATION","核对配置不完整");
         BasicConfiguration b=command.basic();TableSqlConfiguration s=command.tableSql();
         MaxPartitionNum.effective(b.maxPartitionNum());
-        if(b.bcompIndex()<=0||blank(b.name())||blank(b.state())||!("1".equals(b.dateMode())||"2".equals(b.dateMode()))||blank(s.origSql())||blank(s.destSql())||!repository.databasesExist(s.origDatabaseId(),s.destDatabaseId()))throw ApiException.badRequest("INVALID_CONFIGURATION","核对基本信息、SQL或数据库引用不完整");
+        // Legacy Axon imports omit the date mode; keep the same optional rule as task/batch validation.
+        if(b.bcompIndex()<=0||blank(b.name())||blank(b.state())||(!blank(b.dateMode())&&!("1".equals(b.dateMode())||"2".equals(b.dateMode())))||blank(s.origSql())||blank(s.destSql())||!repository.databasesExist(s.origDatabaseId(),s.destDatabaseId()))throw ApiException.badRequest("INVALID_CONFIGURATION","核对基本信息、SQL或数据库引用不完整");
         Set<Long> oldIndexes=new HashSet<>(),newIndexes=new HashSet<>();int keys=0;
         Set<String> names=new HashSet<>();
         for(FieldRule f:command.fields()){
