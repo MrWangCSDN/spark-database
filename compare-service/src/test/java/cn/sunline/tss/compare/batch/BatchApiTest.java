@@ -338,6 +338,30 @@ class BatchApiTest {
         mvc.perform(post("/api/batches").contentType(APPLICATION_JSON).content(request.toString()))
             .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BATCH_PREVIEW_STALE"));
     }
+
+    @Test void changingTablePartitionLimitInvalidatesPreview() throws Exception {
+        configurations(1);
+        var request=request("ALL");
+        var original=submission(request,preview(request));
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=128 WHERE BCOMP_INDEX=1");
+        stale(original);
+        assertThat(count("TSS_BCOMP_TASK_NEW")).isZero();
+        create(submission(request,preview(request)));
+    }
+
+    @Test void previewRejectsCorruptPartitionLimitsAndAcceptsLegacyNull() throws Exception {
+        configurations(1);
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW DROP COLUMN BCOMP_MAX_PARTITION_NUM");
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW ADD COLUMN BCOMP_MAX_PARTITION_NUM DECIMAL(30,1)");
+        for(String value:new String[]{"0","257","-1","64.5","2147483648"}) {
+            jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=?",new java.math.BigDecimal(value));
+            var invalid=preview(request("ALL"));
+            assertThat(invalid.path("blockedCount").asInt()).isEqualTo(1);
+            assertThat(invalid.path("items").get(0).path("issueCode").asText()).isEqualTo("INVALID_MAX_PARTITION_NUM");
+        }
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=NULL");
+        assertThat(preview(request("ALL")).path("readyCount").asInt()).isEqualTo(1);
+    }
     private ObjectNode request(String scope) { return mapper.createObjectNode().put("scope", scope).put("taskBusinessDate", "20260922"); }
     private ObjectNode submission(ObjectNode request, JsonNode preview) {
         return request.deepCopy().put("requestId", UUID.randomUUID().toString()).put("previewFingerprint", preview.path("fingerprint").asText());

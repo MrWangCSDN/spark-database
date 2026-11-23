@@ -91,6 +91,22 @@ class SparkFailureLifecycleTest {
         assertTrue(reason.length()<=500,reason);
     }
 
+    @Test void rejectsCorruptPartitionCapBeforeOpeningBusinessConnections() throws Exception {
+        try (var connection=DriverManager.getConnection(url,"sa","");var statement=connection.createStatement()) {
+            // A hand-edited legacy schema can contain values outside the new DDL constraint.
+            statement.execute("ALTER TABLE TSS_BCOMP_CONF_NEW DROP COLUMN IF EXISTS BCOMP_MAX_PARTITION_NUM");
+            statement.execute("ALTER TABLE TSS_BCOMP_CONF_NEW ADD BCOMP_MAX_PARTITION_NUM INT DEFAULT 0");
+        }
+        String[] args=arguments();
+        args[SparkHandlerTable.OLD_DRIVER_INDEX]="invalid.business.Driver";
+        args[SparkHandlerTable.NEW_DRIVER_INDEX]="invalid.business.Driver";
+
+        var failure=assertThrows(IllegalArgumentException.class,()->SparkHandlerTable.main(args));
+
+        assertTrue(failure.getMessage().contains("1..256"),failure.getMessage());
+        assertNotNull(failedReason());
+    }
+
     @Test void persistsFailureBeforeClosingTheSparkContext() throws Exception {
         var primary=new IllegalStateException(SECRET,new java.io.IOException("No space left on device"));
         READ_FAILURE.set(primary);

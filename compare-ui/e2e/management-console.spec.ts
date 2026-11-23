@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import type { ConfigurationDetail } from '../src/api/types'
 
 const task = {
   bcompIndex: 8, configurationName: '客户余额核对', taskBusinessDate: '20260920', verifyBusinessDate: '20260920',
@@ -7,12 +8,60 @@ const task = {
   file1SuccessCount: null, file2SuccessCount: null, file1FailureCount: null, file2FailureCount: null, readMode: '1'
 }
 
+for (const theme of ['light', 'dark']) {
+  test(`edits the HASH partition limit with browser validation in ${theme} theme`, async ({ page }) => {
+    const configuration: ConfigurationDetail = {
+      basic: { bcompIndex: 8, name: '客户余额核对', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 1, maxPartitionNum: 128, dateMode: '1' },
+      tableSql: { origDatabaseId: 1, destDatabaseId: 2, origSql: 'select CUSTOMER_ID from old_customer', destSql: 'select CUSTOMER_ID from new_customer' },
+      fields: [{ name: 'CUSTOMER_ID', type: '1', memo: '', oldIndex: 1, newIndex: 1, indexFlag: '1', enumFlag: '0', enumIndex: null, partitionFlag: '0', ignoreValue: null, ignoreFlag: '0' }]
+    }
+    const saved: ConfigurationDetail[] = []
+    await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+      const path = new URL(route.request().url()).pathname
+      if (path === '/api/configurations/8' && route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON() as ConfigurationDetail
+        saved.push(body)
+        return route.fulfill({ json: { configuration: body, saved: true, cacheRefreshed: true } })
+      }
+      if (path === '/api/configurations/8') return route.fulfill({ json: configuration })
+      if (path === '/api/configuration-options') return route.fulfill({ json: { states: ['1'], enums: [], ignoreValues: [] } })
+      if (path === '/api/databases') return route.fulfill({ json: { items: [
+        { databaseId: 1, databaseName: '数据库 A', url: 'jdbc:postgresql://old/core', user: 'reader', driver: 'org.postgresql.Driver', encryption: '1', passwordConfigured: true },
+        { databaseId: 2, databaseName: '数据库 B', url: 'jdbc:postgresql://new/core', user: 'reader', driver: 'org.postgresql.Driver', encryption: '1', passwordConfigured: true }
+      ], page: 0, size: 100, total: 2 } })
+      return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+    })
+
+    await page.goto('/configurations/8')
+    await page.getByLabel('主题').selectOption(theme)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    const limit = page.getByRole('spinbutton', { name: '最大 HASH 分区数' })
+    const save = page.getByRole('button', { name: '保存配置' })
+    await expect(limit).toBeVisible()
+    await expect(limit).toHaveValue('128')
+
+    for (const invalid of ['257', '']) {
+      await limit.fill(invalid)
+      await save.click()
+      await expect(page.getByRole('alert')).toContainText('最大 HASH 分区数必须为 1～256 的整数')
+      expect(saved).toHaveLength(0)
+    }
+
+    await limit.fill('256')
+    await save.click()
+    await expect.poll(() => saved.length).toBe(1)
+    expect(saved[0].basic.maxPartitionNum).toBe(256)
+    expect(saved[0].basic.partitionNum).toBe(1)
+    await expect(save).toBeEnabled()
+  })
+}
+
 test('creates a task and inspects its differences', async ({ page }) => {
   let created = false
   await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
     const url = new URL(route.request().url())
     if (url.pathname.endsWith('/database-context')) return route.fulfill({ json: { originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat' } })
-    if (url.pathname === '/api/configurations') return route.fulfill({ json: { items: [{ bcompIndex: 8, name: '客户余额核对', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 8, dateMode: '1' }], page: 0, size: 100, total: 1 } })
+    if (url.pathname === '/api/configurations') return route.fulfill({ json: { items: [{ bcompIndex: 8, name: '客户余额核对', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 8, maxPartitionNum: 64, dateMode: '1' }], page: 0, size: 100, total: 1 } })
     if (url.pathname === '/api/tasks' && route.request().method() === 'POST') { created = true; return route.fulfill({ status: 201, json: task }) }
     if (url.pathname === '/api/tasks') return route.fulfill({ json: { items: [task], page: 0, size: 20, total: 1 } })
     if (url.pathname.endsWith('/differences')) return route.fulfill({ json: { items: [{ businessKey: 'C001', oldContent: '100.00|2026-09-20', newContent: '101.00|2026-09-20', lineResult: '4', reason: '字段值不一致' }], page: 0, size: 20, total: 1 } })

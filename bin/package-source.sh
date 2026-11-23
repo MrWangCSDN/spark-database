@@ -36,6 +36,8 @@ required=(
   compare-spark/pom.xml
   compare-service/src/main/resources/static/index.html
   docs/migration/intranet-build.md
+  sql/add_bcomp_max_partition_num_new.sql
+  sql/add_bcomp_max_partition_num_gdb.sql
 )
 for file in "${required[@]}"; do
   test -f "$staging_dir/$root_name/$file" || {

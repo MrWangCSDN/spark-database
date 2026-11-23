@@ -20,6 +20,9 @@ class PackageScriptTest(unittest.TestCase):
                      'compare-service/target', 'compare-spark/target/jdbc']:
             (self.home / name).mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / 'bin/package.sh', self.home / 'bin/package.sh')
+        for dialect in ['new', 'gdb']:
+            name = 'sql/add_bcomp_max_partition_num_' + dialect + '.sql'
+            shutil.copy2(ROOT / name, self.home / name)
         for name in ['bin/start.sh', 'bin/runtime.sh', 'bin/encrypt-password.sh',
                      'bin/check-driver.sh', 'bin/CheckJdbcDriver.java', 'start.sh',
                      'stop.sh', 'config/application-local.properties.example',
@@ -97,6 +100,10 @@ for project in projects:
         self.assertEqual((self.home / 'maven-arguments.txt').read_text().splitlines(),
                          arguments + ['verify'])
         with tarfile.open(self.archive) as bundle:
+            for dialect in ['new', 'gdb']:
+                name = 'sql/add_bcomp_max_partition_num_' + dialect + '.sql'
+                self.assertEqual(bundle.extractfile('tss-compare/' + name).read(),
+                                 (ROOT / name).read_bytes())
             for folder, project in [('lib', 'compare-service'), ('jobs', 'compare-spark')]:
                 jar_bytes = bundle.extractfile('tss-compare/' + folder + '/' + project +
                                                '-1.0.0-SNAPSHOT.jar').read()

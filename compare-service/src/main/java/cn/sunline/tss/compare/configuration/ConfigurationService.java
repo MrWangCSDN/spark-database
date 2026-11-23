@@ -58,7 +58,7 @@ public class ConfigurationService {
         var source=find(index);
         if(request==null||request.newIndex()<=0||blank(request.newName()))throw ApiException.badRequest("INVALID_COPY_REQUEST","新编号和名称不能为空");
         var b=source.basic();
-        var command=new ConfigurationCommand(new BasicConfiguration(request.newIndex(),request.newName().trim(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),b.partitionNum(),b.dateMode()),source.tableSql(),source.fields());
+        var command=new ConfigurationCommand(new BasicConfiguration(request.newIndex(),request.newName().trim(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),b.partitionNum(),b.dateMode(),b.maxPartitionNum()),source.tableSql(),source.fields());
         return create(command);
     }
     public ConfigurationOptions options(){return repository.options(fieldMatchByName);}
@@ -86,6 +86,7 @@ public class ConfigurationService {
     private void validate(ConfigurationCommand command){
         if(command==null||command.basic()==null||command.tableSql()==null||command.fields()==null||command.fields().isEmpty())throw ApiException.badRequest("INVALID_CONFIGURATION","核对配置不完整");
         BasicConfiguration b=command.basic();TableSqlConfiguration s=command.tableSql();
+        MaxPartitionNum.effective(b.maxPartitionNum());
         if(b.bcompIndex()<=0||blank(b.name())||blank(b.state())||!("1".equals(b.dateMode())||"2".equals(b.dateMode()))||blank(s.origSql())||blank(s.destSql())||!repository.databasesExist(s.origDatabaseId(),s.destDatabaseId()))throw ApiException.badRequest("INVALID_CONFIGURATION","核对基本信息、SQL或数据库引用不完整");
         Set<Long> oldIndexes=new HashSet<>(),newIndexes=new HashSet<>();int keys=0;
         Set<String> names=new HashSet<>();

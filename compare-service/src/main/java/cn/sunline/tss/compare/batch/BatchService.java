@@ -191,6 +191,11 @@ public class BatchService {
 
     private Issue validateConfiguration(BatchRepository.Configuration configuration, String timeNode, String verifyDate) {
         if (configuration == null) return new Issue("CONFIGURATION_NOT_FOUND", "当前核对配置已不存在，请恢复配置或明确排除此项");
+        try {
+            cn.sunline.tss.compare.configuration.MaxPartitionNum.fromMetadata(configuration.value("BCOMP_MAX_PARTITION_NUM"));
+        } catch(ApiException error) {
+            return new Issue(error.code(),error.getMessage());
+        }
         if (blank(configuration.value("BCOMP_NAME")) || blank(configuration.value("BCOMP_STATE"))
             || (!blank(configuration.value("BCOMP_DATE_MODE")) && !Set.of("1", "2").contains(configuration.value("BCOMP_DATE_MODE")))
             || blank(configuration.value("ORIG_SQL")) || blank(configuration.value("DEST_SQL"))

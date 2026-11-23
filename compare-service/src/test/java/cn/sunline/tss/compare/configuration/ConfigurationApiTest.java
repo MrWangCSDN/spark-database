@@ -48,6 +48,131 @@ class ConfigurationApiTest {
             .setControllerAdvice(new ApiExceptionHandler()).build();
     }
 
+    @Test void createsReadsListsAndCopiesTableHashPartitionLimits() throws Exception {
+        var mvc=mvc(()->{});
+        for(int limit:new int[]{1,64,100,128,256}) {
+            long index=1000+limit;
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(index,"limit"+limit),""+limit)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(limit));
+            mvc.perform(get("/api/configurations/"+index)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.basic.maxPartitionNum").value(limit));
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?",Integer.class,index)).isEqualTo(limit);
+        }
+        mvc.perform(get("/api/configurations")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.items[0].maxPartitionNum").value(1));
+        mvc.perform(post("/api/configurations/1256/copy").contentType(APPLICATION_JSON).content("{\"newIndex\":2000,\"newName\":\"copy\"}"))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(256));
+    }
+
+    @Test void defaultsMissingAndNullLimitsAndReadsLegacyNullAs64() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"missing")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(64));
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(23,"null"),"null")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(64));
+        jdbc.execute("ALTER TABLE TSS_BCOMP_CONF_NEW ALTER COLUMN BCOMP_MAX_PARTITION_NUM DROP NOT NULL");
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=NULL WHERE BCOMP_INDEX=22");
+        mvc.perform(get("/api/configurations/22")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(64));
+        mvc.perform(get("/api/configurations")).andExpect(status().isOk()).andExpect(jsonPath("$.items[0].maxPartitionNum").value(64));
+    }
+
+    @Test void omittedOrNullUpdatePreservesLimitAndExplicit64ResetsIt() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(22,"before"),"128")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
+        for(String body:new String[]{valid(22,"omitted"),withLimit(valid(22,"null"),"null")}) {
+            mvc.perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
+        }
+        mvc.perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(withLimit(valid(22,"reset"),"64")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(64));
+    }
+
+    @Test void rejectsInvalidLimitJsonWithoutSavingOrRefreshing() throws Exception {
+        var reloads=new AtomicInteger();var mvc=mvc(reloads::incrementAndGet);
+        for(String token:new String[]{"0","257","-1","64.0","64.5","1e2","\"64\"","true","false","[]","{}","2147483648","-2147483649","999999999999999999999999"}) {
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(22,"invalid"),token)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_MAX_PARTITION_NUM"));
+        }
+        assertThat(reloads).hasValue(0);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Integer.class)).isZero();
+    }
+
+    @Test void malformedConfigurationJsonKeepsTheStructuredApiError() throws Exception {
+        var mvc=mvc(()->{});
+        for(String body:new String[]{"{","{\"basic\":{\"bcompIndex\":\"oops\"}}"}) {
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIGURATION"))
+                .andExpect(jsonPath("$.message").isNotEmpty()).andExpect(jsonPath("$.traceId").isNotEmpty());
+        }
+    }
+
+    @Test void invalidLimitUpdatePreservesTheConfiguration() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(22,"before"),"128")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
+        mvc.perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(withLimit(valid(22,"after"),"8.5")))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_MAX_PARTITION_NUM"));
+        mvc.perform(get("/api/configurations/22")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.basic.name").value("before")).andExpect(jsonPath("$.basic.maxPartitionNum").value(128));
+    }
+
+    @Test void waitingAndRunningTasksBlockPartitionLimitChanges() throws Exception {
+        var mvc=mvc(()->{});
+        for(int index:new int[]{22,23}) {
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(index,"active"),"128")))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
+            jdbc.update("INSERT INTO TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) VALUES(?,'20261123','active','EOD',?)",index,index==22?"1":"2");
+            mvc.perform(put("/api/configurations/"+index).contentType(APPLICATION_JSON).content(withLimit(valid(index,"changed"),"32")))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CONFIGURATION_IN_USE"));
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?",Integer.class,index)).isEqualTo(128);
+        }
+    }
+
+    @Test void allLegacyAxonFormatsPreserveMatchingTableLimitsAndDefaultNewIds() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"original"),"128")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
+        for(String script:new String[]{axonScript("legacy"),hashScript("16","'HASH'"),sampleScript("100"),reviserScript("NULL","NULL")}) {
+            mvc.perform(multipart("/api/configurations/import").file(scriptFile(script))).andExpect(status().isOk());
+            mvc.perform(get("/api/configurations/1")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(128));
+        }
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(axonScript("new").replace("(1,","(2,"))))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/configurations/2")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(64));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",Integer.class)).isZero();
+    }
+
+    @Test void replacingImportDoesNotInheritLimitsFromNonTableConfigurations() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"file"),"256")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(256));
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_TYPE='1' WHERE BCOMP_INDEX=1");
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(axonScript("table")))).andExpect(status().isOk());
+        mvc.perform(get("/api/configurations/1")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(64));
+    }
+
+    @Test void failedReplacingImportRollsBackRowsAndTheirPartitionLimits() throws Exception {
+        var mvc=mvc(()->{});
+        for(int index:new int[]{1,22}) mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON)
+                .content(withLimit(valid(index,"original"+index),index==1?"128":"32")))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(index==1?128:32));
+        var reloads=new AtomicInteger();
+        mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import")
+                .file(scriptFile(axonScript("replacement").replace(" orig',1,"," orig',999,"))))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        assertThat(reloads).hasValue(0);
+        mvc.perform(get("/api/configurations/1")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.basic.name").value("original1")).andExpect(jsonPath("$.basic.maxPartitionNum").value(128));
+        mvc.perform(get("/api/configurations/22")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.basic.maxPartitionNum").value(32));
+        assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("OLD_SQL");
+    }
+
+    String withLimit(String body,String token) {
+        return body.replace("\"partitionNum\":16", "\"partitionNum\":16,\"maxPartitionNum\":"+token);
+    }
+
     @Test void nameModeReportsOptionsAndAcceptsLegacyPositions() throws Exception {
         var mvc=mvcByName();
         mvc.perform(get("/api/configuration-options")).andExpect(status().isOk())

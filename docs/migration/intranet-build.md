@@ -47,6 +47,20 @@ javap -classpath "$job_jar" -p cn.sunline.tss.tssveri.spark.SparkHandlerTable \
 
 本版管理台导入兼容 Axon 自定义 SQL 中的反斜杠。`orig_sql`、`dest_sql` 的 `CONVERT(0x... USING utf8mb4)` 由服务解码后通过 JDBC 参数保存，普通字符串查询也按标准 SQL 单引号规则解析后参数化保存。该修复升级 bd 服务即可生效，原下载脚本可直接重新导入，本次兼容修复无需数据库迁移。
 
+## 单表 HASH 分区上限升级
+
+本版在 bd 单表配置编辑页增加“最大 HASH 分区数”，默认 64，允许 1～256 整数。Spark 仍按两侧 SQL 实际行数自动选择分区数，最终不超过本表上限。例如 2 亿行、上限 100 时实际使用 100 分区；小表不会因上限提高而被强制放大分区数。
+
+已有元数据库按以下顺序升级：
+
+1. 停止 bd，等待全部在途 Spark 作业结束。
+2. 连接服务与 Spark 使用的同一元数据库；GaussDB/PostgreSQL 设置正确 `search_path`，GDB/MySQL 选择正确数据库。确认 `TSS_BCOMP_CONF_NEW` 尚无 `BCOMP_MAX_PARTITION_NUM`。
+3. GaussDB/PostgreSQL 执行一次 `sql/add_bcomp_max_partition_num_new.sql`；GDB/MySQL 执行一次 `sql/add_bcomp_max_partition_num_gdb.sql`。脚本增加默认 64、范围 1～256 的整数列，保留原配置和结果。部分执行后先检查实际结构；GDB/MySQL DDL 会隐式提交。
+4. 同时部署本次 service、Spark 作业 JAR 和内嵌前端，确认 `app_resource` 指向本次作业 JAR，再启动服务。
+5. 用小表保存上限 128 后重开页面确认，发起任务并检查实际 `BCOMP_READ_MODE`。上限 128 并不表示小表必须使用 128 分区。
+
+全新空库执行最新完整建表脚本，无需重复执行增量。应用不会自动执行 DDL；漏迁移时保存或运行明确失败。源码包和发布包均包含上述两个增量。旧 Axon 8/10/11/13 列脚本不变；通过管理台重复导入会保留相同类型 2 配置编号的上限，新编号默认 64，复制配置继承上限。
+
 ## Spark 本地磁盘配置
 
 新版服务会将应用配置中的非空 `spark.local.dir` 传入 Spark 提交命令，支持含空格路径及逗号分隔的多个目录。缺失或空白时由 Spark 自身配置选择目录。可在部署的 `config/application-local.properties` 中设置以下属性，将示例路径替换为实际的大磁盘目录。
@@ -154,10 +168,10 @@ fi
 
 tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz
 tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz \
-  | grep -E 'sql/add_bcomp_(field_counts|result_reviser)_(new|gdb)\.sql$'
+  | grep -E 'sql/add_bcomp_(field_counts|result_reviser|max_partition_num)_(new|gdb)\.sql$'
 ```
 
-验收输出应包含管理台首页、BES Starter、POI 5.3.0 和四个导出升级脚本。发布包还应包含 Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数会继续运行后端和 Spark 测试。外网 `-Plocal-servlet-tests` 用于本地测试，内网 BES 发布使用默认 profile。
+验收输出应包含管理台首页、BES Starter、POI 5.3.0、四个导出升级脚本和两个 HASH 分区上限增量脚本。发布包还应包含 Spark 作业 JAR、运行时 JDBC 驱动、配置示例和启动脚本。上述跳过参数会继续运行后端和 Spark 测试。外网 `-Plocal-servlet-tests` 用于本地测试，内网 BES 发布使用默认 profile。
 
 部署时在 `config/bd.env` 中填写 `TSS_METADATA_PASSWORD='ENC(...)'`。使用 `bin/encrypt-password.sh` 从终端读取元库明文密码并生成密文；加密与运行时都需由外部环境注入同一个 `JASYPT_ENCRYPTOR_PASSWORD`，不要把口令写入源码包或 `bd.env`。启动后检查 BES 的 WebServer 日志和管理台/API 实际可访问；仅通过 Maven 构建不能证明厂商容器运行兼容。
 

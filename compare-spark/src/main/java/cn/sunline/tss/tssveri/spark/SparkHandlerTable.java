@@ -123,6 +123,7 @@ public class SparkHandlerTable {
 
                 Class.forName(args[tssDataSourceDriver]);
                 try (Connection connectionOut=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                    int maxPartitionNum=readMaxPartitionNum(connectionOut,Long.parseLong(args[bcompIndex]));
                     int limit=readSampleLimit(connectionOut,Long.parseLong(args[bcompIndex]),sc.conf().get("spark.compare.detailLimit","100"));
                     DailyResultPublisher.Context resultContext=DailyResultPublisher.context(connectionOut,Long.parseLong(args[bcompIndex]));
                     //获取tssBcompField字段信息（需在获取数据源配置之前，因为分区列从field表中读取）
@@ -154,7 +155,7 @@ public class SparkHandlerTable {
                     PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_OLD_INDEX);
                     PrimaryKeyHashPlanner.keyPositions(tssBcompFieldDataRows, FIELD_NEW_INDEX);
                     //实时统计两侧本次 SQL 的行数，自动选择相同的 HASH 分区数。
-                    ShardConf shardConf = new ShardConf(AutoHashPartitionPlanner.plan(args));
+                    ShardConf shardConf = new ShardConf(AutoHashPartitionPlanner.plan(args, maxPartitionNum));
                     //按所有主键字段构造HASH读取计划；失败直接终止
                     ReadPlan readPlan = resolveReadPlan(args, tssBcompFieldDataRows, shardConf);
                     //回写实际读取策略到TSS_BCOMP_TASK_NEW.BCOMP_READ_MODE，运维可见实际分区数（列不存在时只告警）
@@ -555,6 +556,25 @@ public class SparkHandlerTable {
             return true;
         }
         return false;
+    }
+
+    /** Read the table cap on the already-open metadata connection before source COUNTs. */
+    static int readMaxPartitionNum(Connection connection, long configurationIndex) throws SQLException {
+        try (PreparedStatement ps=connection.prepareStatement("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?")) {
+            ps.setLong(1,configurationIndex);
+            try (ResultSet rs=ps.executeQuery()) {
+                if (!rs.next()) throw new IllegalArgumentException("核对配置不存在");
+                Object value=rs.getObject(1);
+                if (value==null) return AutoHashPartitionPlanner.DEFAULT_MAX_PARTITION_NUM;
+                try {
+                    int cap=new java.math.BigDecimal(value.toString()).intValueExact();
+                    PrimaryKeyHashPlanner.partitionCount(cap);
+                    return cap;
+                } catch (NumberFormatException | ArithmeticException error) {
+                    throw new IllegalArgumentException("最大 HASH 分区数必须为1..256整数",error);
+                }
+            }
+        }
     }
 
     /** A per-table zero is explicit; only NULL uses the current global fallback. */

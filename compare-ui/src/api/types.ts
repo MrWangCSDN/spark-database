@@ -8,7 +8,7 @@ export interface TaskSummary {
 }
 export interface DifferenceSummary { businessKey: string; oldContent: string; newContent: string; lineResult: string; reason: string }
 export interface DashboardSummary { serviceStatus: string; runningCount: number; todayCompletedCount: number; todayDifferenceCount: number; updatedAt: string; recentTasks: TaskSummary[] }
-export interface BasicConfiguration { bcompIndex: number; name: string; module: string; memo: string; range: string; timeNode: string; state: string; partitionNum: number | null; dateMode: string | null }
+export interface BasicConfiguration { bcompIndex: number; name: string; module: string; memo: string; range: string; timeNode: string; state: string; partitionNum: number | null; maxPartitionNum?: number | null; dateMode: string | null }
 export interface TableSqlConfiguration { origDatabaseId: number; destDatabaseId: number; origSql: string; destSql: string }
 export interface FieldRule { name: string; type: string; memo: string; oldIndex: number; newIndex: number; indexFlag: string; enumFlag: string; enumIndex: number | null; partitionFlag: string; ignoreValue: string | null; ignoreFlag: string }
 export interface ConfigurationDetail { basic: BasicConfiguration; tableSql: TableSqlConfiguration; fields: FieldRule[] }

@@ -10,6 +10,42 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.*;
 
 class NewSchemaTest {
+    @Test void partitionLimitMigrationsPreserveRowsAndDefaultTo64() throws Exception {
+        for(String dialect:new String[]{"new","gdb"}) {
+            String mode=dialect.equals("new")?"PostgreSQL":"MySQL";
+            var ds=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";MODE="+mode+";DB_CLOSE_DELAY=-1","sa","");
+            var jdbc=new JdbcTemplate(ds);
+            jdbc.execute("CREATE TABLE TSS_BCOMP_CONF_NEW(BCOMP_INDEX BIGINT PRIMARY KEY,BCOMP_NAME VARCHAR(100))");
+            jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW VALUES(1,'existing')");
+            executeOnH2(ds,"../sql/add_bcomp_max_partition_num_"+dialect+".sql");
+            assertThat(jdbc.queryForObject("SELECT BCOMP_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("existing");
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",Integer.class)).isEqualTo(64);
+            jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME) VALUES(2,'new')");
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=2",Integer.class)).isEqualTo(64);
+            for(int limit:new int[]{1,100,128,256}) jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=? WHERE BCOMP_INDEX=1",limit);
+            for(Integer invalid:new Integer[]{0,257,null}) assertThatThrownBy(()->jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=? WHERE BCOMP_INDEX=1",invalid))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        }
+    }
+
+    @Test void bothFullSchemasDefaultAndConstrainTablePartitionLimits() throws Exception {
+        for(String dialect:new String[]{"new","gdb"}) {
+            var ds=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";MODE="+(dialect.equals("new")?"PostgreSQL":"MySQL")+";DB_CLOSE_DELAY=-1","sa","");
+            executeOnH2(ds,"../sql/create_bcomp_"+dialect+".sql");
+            var jdbc=new JdbcTemplate(ds);
+            jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME) VALUES(1,'default')");
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(64);
+            assertThatThrownBy(()->jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=257"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        }
+    }
+
+    private void executeOnH2(javax.sql.DataSource source,String path) throws Exception {
+        // H2's MySQL mode needs BEGIN in place of the vendor transaction wrapper.
+        String sql=java.nio.file.Files.readString(java.nio.file.Path.of(path)).replace("START TRANSACTION;","BEGIN;");
+        new ResourceDatabasePopulator(new org.springframework.core.io.ByteArrayResource(sql.getBytes(java.nio.charset.StandardCharsets.UTF_8))).execute(source);
+    }
+
     @Test void productionDdlCreatesEmptyTablesSupportsWideSqlAndUniqueTaskIdentity() {
         var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         new ResourceDatabasePopulator(new FileSystemResource("../sql/create_bcomp_new.sql")).execute(ds);

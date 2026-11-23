@@ -180,9 +180,15 @@ Axon 自定义 SQL 含反斜杠时，导出的 `orig_sql`、`dest_sql` 使用 `C
 
 脚本大小可通过 `compare.config-import-max-bytes` 调整，同时应把 `spring.servlet.multipart.max-file-size` 和 `spring.servlet.multipart.max-request-size` 设为不小于该值。默认分别为 50 MiB 和 51 MiB。
 
-### 授权配置主键哈希读取分区
+### 配置主键哈希读取分区
 
-新版 Axon-link 不再提供表级分区数调参；样本上限仍可由授权人员配置（0–10000，默认 100，0 表示只保存汇总）。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单。历史分区数接口和字段只作兼容，不能影响 bd 的实际运行分区数。
+在 bd 管理台单张表的配置编辑页设置“最大 HASH 分区数”，范围为 **1～256 的整数，默认 64**。每次运行仍精确统计两侧本次 SQL，以较大侧每百万行一档向上取二次幂，再与本表上限取较小值。例如 300 万行、上限 128 时用 4 分区；2 亿行、上限 100 时用 100 分区；空表用 1 分区。提高上限不会强制小表使用更多分区。两侧使用相同的实际分区数。
+
+该上限独立保存为 `BCOMP_MAX_PARTITION_NUM`，不复用历史 `BCOMP_PARTITION_NUM`。新建配置默认 64；复制配置继承上限；再次通过管理台导入 Axon 脚本时，相同配置编号保留 bd 已设置的上限，新编号默认 64。旧客户端修改配置遗漏该字段时保留原值。旧 8/10/11/13 列导入格式保持兼容。
+
+已有环境升级：先停止 bd 并确认在途 Spark 作业结束，在服务和 Spark 使用的同一元数据库/schema 执行一次增量脚本：GaussDB/PostgreSQL 使用 `sql/add_bcomp_max_partition_num_new.sql`；GDB/MySQL 使用 `sql/add_bcomp_max_partition_num_gdb.sql`。旧配置上限初始化为 64，保留原配置与结果。先检查列是否已存在，部分执行后不要直接重跑；GDB/MySQL DDL 会隐式提交。随后同步部署新版服务、Spark JAR 和服务内嵌前端。全新空库使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql`。应用不自动执行迁移；缺列会明确失败。
+
+Axon-link 样本上限仍可由授权人员配置（0–10000，默认 100，0 表示只保存汇总）。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单。Axon 历史分区数接口和字段只作兼容，不能影响 bd 的实际运行分区数。
 
 样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为兼容值 1、`'HASH'` 和每个差异字段组合的样本上限（0–10000，Axon 新建配置默认 100）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。新版导出还在末尾追加 `reviser_name,reviser_username` 两列，形成 13 列脚本；两列允许 NULL 或最长 100 字符的修订人姓名、用户名。比对端兼容原 8 列、前版 10 列、11 列及新版 13 列脚本，新格式的非法兼容列值、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；运行时不会按这个列值确定实际分区数；全部表配置都必须包含主键。
 
@@ -252,7 +258,7 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 
 已部署环境先停止服务并等待所有 Spark 作业结束，在元数据库对应 schema 执行 `sql/add_bcomp_daily_results_new.sql`；首次空库使用 `sql/create_bcomp_new.sql`。重新构建并同时替换服务和 Spark 两个 JAR，保留现场连接、驱动及密码配置。
 
-运行时先统计两侧本次 SQL 的准确行数，取较大值，按每 100 万行一档向上取 1、2、4、8、16、32、64 个分区；最大 64。两侧使用相同分区数和全部 `FIELD_INDEX_FLAG=1` 字段组成的主键做 HASH。统计失败直接使任务失败。`BCOMP_PARTITION_NUM` 仅作历史脚本兼容，运行时忽略。RANGE、NTILE 和分区字段选择已删除。旧策略列和分区标记列只为兼容旧导入格式保留，不能改变读取策略；保存/导入时分区标记清零。旧配置无需单独修改策略值。
+运行时先读取并校验本表 `BCOMP_MAX_PARTITION_NUM`（默认 64，允许 1～256 整数），再统计两侧本次 SQL 的准确行数，取较大值，按每 100 万行一档向上取二次幂，最后受本表上限约束。两侧使用相同分区数和全部 `FIELD_INDEX_FLAG=1` 字段组成的主键做 HASH。统计或上限读取失败直接使任务失败。`BCOMP_PARTITION_NUM` 仅作历史脚本兼容，运行时忽略。RANGE、NTILE 和分区字段选择已删除。旧策略列和分区标记列只为兼容旧导入格式保留，不能改变读取策略；保存/导入时分区标记清零。旧配置无需单独修改策略值。
 
 每日结果按“配置编号＋核对业务日期”保存一份最新成功结果。核对业务日期优先取 VERIFY_BUSINESS_DATE，否则取 TASK_BUSI_DATE。汇总为全量准确计数：仅一侧存在各保存至多 `BCOMP_SAMPLE_LIMIT` 条；主键相同但内容不同的行按完整差异字段组合分别计数，每个组合各保存至多该上限的样本（0–10000）。例如 `[a]` 与 `[a,b]` 是互斥的两组，组数之和等于该表的字段差异总数。值为 0 时只保存汇总。该列为 NULL（含旧 8/10 列脚本）时使用全局 `BD_DIFF_DETAIL_LIMIT`（默认 100）；显式配置的旧值 1000 不变。结果 `detailLimit` 记录实际采用的上限；重复成功执行原子替换，失败保留上一份成功结果。每个任务最多允许 128 种字段组合、合计 20000 条组合样本，超出时任务失败并保留上次成功结果。字段过长时样本截断并提示，不影响总量统计。`BD_DIFF_RETENTION_DAYS=30` 控制按最后发布时间清理样本，保留汇总，允许 1–3650 天。历史全量明细不自动删除。
 

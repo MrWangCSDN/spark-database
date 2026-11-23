@@ -23,6 +23,25 @@ class AutoHashPartitionPlannerTest {
         assertThrows(IllegalArgumentException.class, () -> AutoHashPartitionPlanner.partitions(-1));
     }
 
+    @Test void capsAutomaticPartitionsPerTableWithoutInflatingSmallTables() {
+        assertEquals(4, AutoHashPartitionPlanner.partitions(3_000_000, 64));
+        assertEquals(32, AutoHashPartitionPlanner.partitions(50_000_000, 32));
+        assertEquals(128, AutoHashPartitionPlanner.partitions(200_000_000, 128));
+        assertEquals(100, AutoHashPartitionPlanner.partitions(200_000_000, 100));
+        assertEquals(100, AutoHashPartitionPlanner.partitions(65_000_000, 100));
+        assertEquals(256, AutoHashPartitionPlanner.partitions(Long.MAX_VALUE, 256));
+        assertEquals(1, AutoHashPartitionPlanner.partitions(0, 256));
+        assertEquals(1, AutoHashPartitionPlanner.partitions(Long.MAX_VALUE, 1));
+        assertThrows(IllegalArgumentException.class, () -> AutoHashPartitionPlanner.partitions(-1, 256));
+        for (int invalid : new int[]{0, -1, 257, Integer.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class, () -> AutoHashPartitionPlanner.partitions(1, invalid));
+        }
+    }
+
+    @Test void rejectsInvalidCapBeforeAccessingSourceConnections() {
+        assertThrows(IllegalArgumentException.class, () -> AutoHashPartitionPlanner.plan(new String[21], 257));
+    }
+
     @Test void countsBothFilteredQueriesAndUsesLargerSide() throws Exception {
         String url = "jdbc:h2:mem:auto_" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
         try (Connection connection = DriverManager.getConnection(url, "sa", "");
@@ -38,6 +57,8 @@ class AutoHashPartitionPlannerTest {
             args[SparkHandlerTable.OLD_TABLE_INDEX] = "(SELECT id FROM samples WHERE id <= 1000000) old_src";
             args[SparkHandlerTable.NEW_TABLE_INDEX] = "(SELECT id FROM samples) new_src";
             assertEquals(2, AutoHashPartitionPlanner.plan(args));
+            assertEquals(1, AutoHashPartitionPlanner.plan(args, 1));
+            assertEquals(2, AutoHashPartitionPlanner.plan(args, 256));
             args[SparkHandlerTable.NEW_TABLE_INDEX] = "(SELECT id FROM missing_table) new_src";
             assertThrows(Exception.class, () -> AutoHashPartitionPlanner.plan(args));
         }
