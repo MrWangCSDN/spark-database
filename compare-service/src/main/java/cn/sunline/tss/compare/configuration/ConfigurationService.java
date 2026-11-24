@@ -28,7 +28,14 @@ public class ConfigurationService {
     public ConfigurationService(ConfigurationRepository repository,CacheReloader cache,long maxImportBytes){this(repository,cache,maxImportBytes,false);}
     @Autowired public ConfigurationService(ConfigurationRepository repository,CacheReloader cache,@Value("${compare.config-import-max-bytes:52428800}")long maxImportBytes,@Value("${compare.field-match-by-name:true}")boolean fieldMatchByName){this.repository=repository;this.cache=cache;this.maxImportBytes=maxImportBytes;this.fieldMatchByName=fieldMatchByName;}
 
-    public PageResult<BasicConfiguration> list(int page,int size){if(page<0||size<1||size>100)throw ApiException.badRequest("INVALID_PAGE","分页参数不合法");return repository.list(page,size);}
+    public PageResult<BasicConfiguration> list(int page,int size){return list(page,size,null);}
+    public PageResult<BasicConfiguration> list(int page,int size,String keyword){
+        if(page<0||size<1||size>100)throw ApiException.badRequest("INVALID_PAGE","分页参数不合法");
+        String normalized=keyword==null?null:keyword.trim();
+        if(normalized!=null&&normalized.isBlank())normalized=null;
+        if(normalized!=null&&normalized.length()>100)throw ApiException.badRequest("INVALID_CONFIGURATION_QUERY","配置名称关键词最多100字符");
+        return repository.list(page,size,normalized);
+    }
     public ConfigurationDetail find(long index){var value=repository.find(index);if(value==null)throw ApiException.notFound("CONFIGURATION_NOT_FOUND","核对配置不存在");return value;}
 
     public ConfigurationSaveResult create(ConfigurationCommand command){

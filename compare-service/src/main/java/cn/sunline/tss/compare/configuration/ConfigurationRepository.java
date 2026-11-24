@@ -13,6 +13,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import javax.sql.DataSource;
 import java.util.List;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Locale;
 import java.io.Reader;
 
 @Repository
@@ -40,11 +42,19 @@ public class ConfigurationRepository {
         return new ConfigurationDetail(basics.get(0),sql,fields);
     }
 
-    PageResult<BasicConfiguration> list(int page,int size){
-        Long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2'",Long.class);
-        var pageSql=dialect.page("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2' ORDER BY BCOMP_INDEX",(long)page*size,size);
+    PageResult<BasicConfiguration> list(int page,int size){return list(page,size,null);}
+    PageResult<BasicConfiguration> list(int page,int size,String keyword){
+        String where=" WHERE BCOMP_TYPE='2'";
+        var parameters=new ArrayList<Object>();
+        if(keyword!=null&&!keyword.isBlank()){
+            where+=" AND LOWER(BCOMP_NAME) LIKE ? ESCAPE '!'";
+            parameters.add("%"+keyword.toLowerCase(Locale.ROOT).replace("!","!!").replace("%","!%").replace("_","!_")+"%");
+        }
+        Long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW"+where,Long.class,parameters.toArray());
+        var pageSql=dialect.page("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW"+where+" ORDER BY BCOMP_INDEX",(long)page*size,size);
+        parameters.addAll(pageSql.parameters());
         List<BasicConfiguration> items=jdbc.query(pageSql.sql(),
-            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9),MaxPartitionNum.fromMetadata(rs.getObject(10))),pageSql.parameters().toArray());
+            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9),MaxPartitionNum.fromMetadata(rs.getObject(10))),parameters.toArray());
         return new PageResult<>(items,page,size,total==null?0:total);
     }
 

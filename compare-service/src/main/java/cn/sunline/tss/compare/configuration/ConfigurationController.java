@@ -16,7 +16,8 @@ import org.springframework.web.multipart.MultipartFile;
 public class ConfigurationController {
     private final ConfigurationService service;
     public ConfigurationController(ConfigurationService service){this.service=service;}
-    @GetMapping("/api/configurations") PageResult<BasicConfiguration> list(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="20")int size){return service.list(page,size);}
+    PageResult<BasicConfiguration> list(int page,int size){return service.list(page,size);}
+    @GetMapping("/api/configurations") PageResult<BasicConfiguration> list(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="20")int size,@RequestParam(required=false)String keyword){return service.list(page,size,keyword);}
     @PostMapping(value="/api/configurations/import",consumes=MediaType.MULTIPART_FORM_DATA_VALUE) ConfigScriptImportResult importScript(@RequestPart(value="file",required=false) MultipartFile file){return service.importScript(file);}
     @GetMapping("/api/configurations/{index}") ConfigurationDetail find(@PathVariable long index){return service.find(index);}
     @PostMapping("/api/configurations") ResponseEntity<ConfigurationSaveResult> create(@RequestBody ConfigurationCommand command){var result=service.create(command);return ResponseEntity.created(URI.create("/api/configurations/"+result.configuration().basic().bcompIndex())).body(result);}

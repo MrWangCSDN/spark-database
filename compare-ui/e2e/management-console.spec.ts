@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import type { ConfigurationDetail } from '../src/api/types'
+import type { BasicConfiguration, BatchRequest, ConfigurationDetail } from '../src/api/types'
 
 const task = {
   bcompIndex: 8, configurationName: '客户余额核对', taskBusinessDate: '20260920', verifyBusinessDate: '20260920',
@@ -53,6 +53,63 @@ for (const theme of ['light', 'dark']) {
     expect(saved[0].basic.maxPartitionNum).toBe(256)
     expect(saved[0].basic.partitionNum).toBe(1)
     await expect(save).toBeEnabled()
+  })
+
+  test(`searches configurations and preserves hidden selections in ${theme} theme`, async ({ page }) => {
+    const first: BasicConfiguration = { bcompIndex: 8, name: '初始配置', module: 'CORE', memo: '', range: '', timeNode: 'D', state: '1', partitionNum: 1, maxPartitionNum: 64, dateMode: '1' }
+    const configurations = [first, ...Array.from({ length: 21 }, (_, index) => ({ ...first, bcompIndex: 101 + index, name: `loan_${index + 1}` }))]
+    const queries: URL[] = [], previews: BatchRequest[] = []
+    await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/configurations') {
+        queries.push(url)
+        const keyword = (url.searchParams.get('keyword') ?? '').toLowerCase()
+        const matches = configurations.filter(item => item.name.toLowerCase().includes(keyword))
+        const currentPage = Number(url.searchParams.get('page')), size = Number(url.searchParams.get('size'))
+        return route.fulfill({ json: { items: matches.slice(currentPage * size, (currentPage + 1) * size), page: currentPage, size, total: matches.length } })
+      }
+      if (url.pathname === '/api/batches/preview') {
+        const body = route.request().postDataJSON() as BatchRequest
+        previews.push(body)
+        const items = body.configurationIds!.map(id => ({ bcompIndex: id, configurationName: configurations.find(item => item.bcompIndex === id)!.name, module: 'CORE', verifyBusinessDate: body.verifyBusinessDate, timeNode: 'D', ready: true, issueCode: null, issueMessage: null, configurationChanged: false }))
+        return route.fulfill({ json: { fingerprint: 'selected-search', taskBusinessDate: body.taskBusinessDate, verifyBusinessDate: body.verifyBusinessDate, totalCount: items.length, readyCount: items.length, blockedCount: 0, changedCount: 0, items } })
+      }
+      return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+    })
+
+    await page.goto('/configurations?keyword=loan_&page=1')
+    await page.getByLabel('主题').selectOption(theme)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    await expect(page.getByRole('checkbox', { name: '选择 loan_21', exact: true })).toBeVisible()
+    await page.reload()
+    const input = page.getByRole('textbox', { name: '配置名称' })
+    await expect(input).toHaveValue('loan_')
+    await expect(page.getByText('第 2 / 2 页 · 共 21 条')).toBeVisible()
+    await page.getByRole('button', { name: '重置', exact: true }).click()
+    await page.getByRole('checkbox', { name: '选择 初始配置', exact: true }).check()
+    await input.fill('  loan_  ')
+    await page.getByRole('button', { name: '查询', exact: true }).click()
+    await expect(page.getByText('第 1 / 2 页 · 共 21 条')).toBeVisible()
+    await expect(input).toHaveValue('loan_')
+    expect(queries[queries.length - 1].searchParams.get('keyword')).toBe('loan_')
+    expect(queries[queries.length - 1].searchParams.get('page')).toBe('0')
+    await page.getByRole('checkbox', { name: '选择当前页所有配置' }).check()
+    await expect(page.locator('.selection-toolbar')).toContainText('跨页已选 21 项')
+    await page.getByRole('button', { name: '下一页' }).click()
+    await page.getByRole('checkbox', { name: '选择 loan_21', exact: true }).check()
+    await expect(page.locator('.selection-toolbar')).toContainText('跨页已选 22 项')
+    await expect(page.getByRole('link', { name: '发起全部比对' })).toHaveAttribute('href', '/batches/new')
+    await input.fill('missing')
+    await input.press('Enter')
+    await expect(page.getByText('没有符合条件的配置')).toBeVisible()
+    await page.getByRole('button', { name: '重置', exact: true }).click()
+    await expect(page.getByRole('checkbox', { name: '选择 初始配置', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: '发起所选比对' }).click()
+    await expect(page.getByText('已选 22 项配置')).toBeVisible()
+    await page.getByRole('button', { name: '预检配置' }).click()
+    await expect(page.getByRole('button', { name: '确认发起' })).toBeEnabled()
+    expect(previews[0].scope).toBe('SELECTED')
+    expect(previews[0].configurationIds).toEqual([8, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121])
   })
 }
 
