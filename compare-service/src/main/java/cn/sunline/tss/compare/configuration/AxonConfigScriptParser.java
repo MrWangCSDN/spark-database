@@ -10,8 +10,10 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,7 +25,8 @@ final class AxonConfigScriptParser {
     private static final List<String> HASH_CONF_COLUMNS = List.of("bcomp_index","bcomp_module","bcomp_name","bcomp_memo","bcomp_type","bcomp_range","bcomp_time_node","bcomp_state","bcomp_partition_num","bcomp_shard_strategy");
     private static final List<String> SAMPLE_CONF_COLUMNS = java.util.stream.Stream.concat(HASH_CONF_COLUMNS.stream(), java.util.stream.Stream.of("bcomp_sample_limit")).toList();
     private static final List<String> REVISER_CONF_COLUMNS = java.util.stream.Stream.concat(SAMPLE_CONF_COLUMNS.stream(), java.util.stream.Stream.of("reviser_name","reviser_username")).toList();
-    private static final List<List<String>> CONF_LAYOUTS = List.of(CONF_COLUMNS,HASH_CONF_COLUMNS,SAMPLE_CONF_COLUMNS,REVISER_CONF_COLUMNS);
+    private static final List<String> MAX_PARTITION_CONF_COLUMNS = java.util.stream.Stream.concat(REVISER_CONF_COLUMNS.stream(), java.util.stream.Stream.of("bcomp_max_partition_num")).toList();
+    private static final List<List<String>> CONF_LAYOUTS = List.of(CONF_COLUMNS,HASH_CONF_COLUMNS,SAMPLE_CONF_COLUMNS,REVISER_CONF_COLUMNS,MAX_PARTITION_CONF_COLUMNS);
     private static final List<String> FIELD_COLUMNS = List.of("bcomp_index","field_name","field_type","field_memo","field_old_index","field_new_index","field_index_flag","field_enum_flag");
     private static final List<String> SQL_COLUMNS = List.of("bcomp_index","orig_sql","orig_database_id","dest_sql","dest_database_id");
 
@@ -87,7 +90,8 @@ final class AxonConfigScriptParser {
             throw ApiException.badRequest("CONFIG_SCRIPT_READ_FAILED", "配置脚本读取失败");
         }
         if (!state.committed) invalid();
-        return new ParseResult(state.confRows, state.fieldRows, state.sqlRows, state.hasHashConfigurations);
+        return new ParseResult(state.confRows, state.fieldRows, state.sqlRows, state.hasHashConfigurations,
+            Set.copyOf(state.explicitMaxPartitionIndexes));
     }
 
     private void accept(String raw, State state, Consumer<Command> executor) {
@@ -121,10 +125,13 @@ final class AxonConfigScriptParser {
         if (phase > state.phase && (state.phase == 0 ? state.confRows : state.fieldRows) == 0) invalid();
         state.phase = phase;
         boolean hashConfiguration = phase == 0 && columns.size() >= HASH_CONF_COLUMNS.size();
-        boolean reviserConfiguration = phase == 0 && columns.equals(REVISER_CONF_COLUMNS);
-        ParsedValues values = parseLiteralRows(matcher.group(3), expected.size(), hashConfiguration, reviserConfiguration, phase == 2);
+        boolean maxPartitionConfiguration = phase == 0 && columns.equals(MAX_PARTITION_CONF_COLUMNS);
+        boolean reviserConfiguration = phase == 0 && (columns.equals(REVISER_CONF_COLUMNS) || maxPartitionConfiguration);
+        ParsedValues values = parseLiteralRows(matcher.group(3), expected.size(), hashConfiguration, reviserConfiguration,
+            maxPartitionConfiguration, phase == 2);
         int rows = values.rows();
         state.hasHashConfigurations |= hashConfiguration;
+        state.explicitMaxPartitionIndexes.addAll(values.explicitMaxPartitionIndexes());
         if (phase == 0) state.confRows += rows;
         else if (phase == 1) state.fieldRows += rows;
         else state.sqlRows += rows;
@@ -132,15 +139,17 @@ final class AxonConfigScriptParser {
     }
 
     private ParsedValues parseLiteralRows(String values, int columnCount, boolean hashConfiguration,
-                                          boolean reviserConfiguration, boolean tableSql) {
+                                          boolean reviserConfiguration, boolean maxPartitionConfiguration, boolean tableSql) {
         int position=0, rows=0, copiedThrough=0;
         StringBuilder sql=new StringBuilder(values.length());
         List<String> parameters=new ArrayList<>();
+        Set<Long> explicitMaxPartitionIndexes=new LinkedHashSet<>();
         while (true) {
             position=skip(values,position);
             if (position>=values.length()) break;
             if (values.charAt(position++)!='(') invalid();
             int columns=0;
+            Long configurationIndex=null;
             while (true) {
                 position=skip(values,position);
                 if (position>=values.length()) invalid();
@@ -158,7 +167,7 @@ final class AxonConfigScriptParser {
                     queryValue=decodeUtf8Hex(encoded.group(1));
                     position=encoded.end();
                 }
-                else if (reviserConfiguration && columns >= SAMPLE_CONF_COLUMNS.size()) {
+                else if (reviserConfiguration && columns >= SAMPLE_CONF_COLUMNS.size() && columns < REVISER_CONF_COLUMNS.size()) {
                     if (!values.regionMatches(true,position,"NULL",0,4)) invalid();
                     position+=4;
                 }
@@ -176,6 +185,8 @@ final class AxonConfigScriptParser {
                 if (hashConfiguration && columns == 8) validatePartitionCount(values.substring(tokenStart, position));
                 if (hashConfiguration && columns == 9 && !"'HASH'".equalsIgnoreCase(values.substring(tokenStart, position))) invalid();
                 if (hashConfiguration && columns == 10) validateSampleLimit(values.substring(tokenStart, position));
+                if (maxPartitionConfiguration && columns == 0) configurationIndex=configurationIndex(values.substring(tokenStart, position));
+                if (maxPartitionConfiguration && columns == 13) validatePartitionCount(values.substring(tokenStart, position));
                 columns++;
                 position=skip(values,position);
                 if(position>=values.length()) invalid();
@@ -184,13 +195,20 @@ final class AxonConfigScriptParser {
                 if(delimiter!=',') invalid();
             }
             if(columns!=columnCount) invalid();
+            if(maxPartitionConfiguration) explicitMaxPartitionIndexes.add(configurationIndex);
             rows++;
             position=skip(values,position);
             if(position>=values.length()) break;
             if(values.charAt(position++)!=',') invalid();
         }
         sql.append(values,copiedThrough,values.length());
-        return new ParsedValues(rows,sql.toString(),List.copyOf(parameters));
+        return new ParsedValues(rows,sql.toString(),List.copyOf(parameters),Set.copyOf(explicitMaxPartitionIndexes));
+    }
+
+    private long configurationIndex(String token) {
+        if(token.startsWith("'")) token=token.substring(1,token.length()-1).replace("''","'");
+        try { return Long.parseLong(token.trim()); }
+        catch(NumberFormatException exception) { invalid(); return 0L; }
     }
 
     private String decodeUtf8Hex(String hex) {
@@ -239,12 +257,16 @@ final class AxonConfigScriptParser {
     private String stripBom(String value){return value.startsWith("\uFEFF")?value.substring(1):value;}
     private static void invalid(){throw ApiException.badRequest("INVALID_CONFIG_SCRIPT","配置脚本不符合 Axon 固定格式");}
 
-    private record ParsedValues(int rows,String sql,List<String> parameters) {}
+    private record ParsedValues(int rows,String sql,List<String> parameters,Set<Long> explicitMaxPartitionIndexes) {}
     record Command(Kind kind,String value,List<String> parameters) {
         static Command clear(String table){return new Command(Kind.CLEAR,table,List.of());}
         static Command insert(String sql,List<String> parameters){return new Command(Kind.INSERT,sql,parameters);}
     }
     enum Kind { CLEAR, INSERT }
-    record ParseResult(long configurationCount,long fieldCount,long tableSqlCount,boolean hasHashConfigurations) {}
-    private static final class State { int step; int phase; long confRows; long fieldRows; long sqlRows; boolean committed; boolean hasHashConfigurations; }
+    record ParseResult(long configurationCount,long fieldCount,long tableSqlCount,boolean hasHashConfigurations,
+                       Set<Long> explicitMaxPartitionIndexes) {}
+    private static final class State {
+        int step; int phase; long confRows; long fieldRows; long sqlRows; boolean committed; boolean hasHashConfigurations;
+        final Set<Long> explicitMaxPartitionIndexes=new LinkedHashSet<>();
+    }
 }

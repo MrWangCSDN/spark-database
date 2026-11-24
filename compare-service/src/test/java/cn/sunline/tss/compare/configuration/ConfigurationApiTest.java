@@ -186,6 +186,100 @@ class ConfigurationApiTest {
         mvc.perform(get("/api/configurations/1")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(64));
     }
 
+    @Test void importsExplicitMaximumAndAllowsAnExcelReviserNameWithoutUsername() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"original"),"128")))
+            .andExpect(status().isCreated());
+        for(int limit:new int[]{1,64,100,256}) {
+            jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=128 WHERE BCOMP_INDEX=1");
+            mvc.perform(multipart("/api/configurations/import").file(scriptFile(maxPartitionScript(""+limit))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.configurationCount").value(1));
+            mvc.perform(get("/api/configurations/1")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.basic.maxPartitionNum").value(limit));
+            assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("Excel负责人");
+            assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isNull();
+        }
+    }
+
+    @Test void importsNamedProfileContractFixtureWithCompositePrimaryKeys() throws Exception {
+        byte[] script;
+        try(var input=new ClassPathResource("axon-named-max-partition-config.sql").getInputStream()) {
+            script=input.readAllBytes();
+        }
+        var file=new MockMultipartFile("file","axon-named-max-partition-config.sql","application/sql",script);
+        mvc(()->{}).perform(multipart("/api/configurations/import").file(file))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.configurationCount").value(1))
+            .andExpect(jsonPath("$.fieldCount").value(3)).andExpect(jsonPath("$.tableSqlCount").value(1));
+        assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",Integer.class)).isEqualTo(256);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=1 AND FIELD_INDEX_FLAG='1'",Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=1",String.class))
+            .isEqualTo("(select TENANT_ID,ACCOUNT_ID,BALANCE from account_detail) orig");
+    }
+
+    @Test void mixedConfLayoutsRestoreOnlyRowsWithoutAnExplicitMaximum() throws Exception {
+        var mvc=mvc(()->{});
+        for(int index:new int[]{1,2}) {
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON)
+                    .content(withLimit(valid(index,"old"+index),index==1?"128":"32")))
+                .andExpect(status().isCreated());
+        }
+        String script="""
+            START TRANSACTION;
+            TRUNCATE TABLE TSS_BCOMP_FIELD_NEW;
+            TRUNCATE TABLE TSS_BCOMP_TABLE_SQL_NEW;
+            TRUNCATE TABLE TSS_BCOMP_CONF_NEW;
+            INSERT INTO TSS_BCOMP_CONF_NEW
+              (bcomp_index,bcomp_module,bcomp_name,bcomp_memo,bcomp_type,bcomp_range,bcomp_time_node,bcomp_state,bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit,reviser_name,reviser_username,bcomp_max_partition_num)
+            VALUES (1,'dept','explicit-existing','memo','2','1','3','1',1,'HASH',100,'Excel负责人',NULL,100),
+                   (4,'dept','explicit-new','memo','2','1','3','1',1,'HASH',100,NULL,NULL,256);
+            INSERT INTO TSS_BCOMP_CONF_NEW
+              (bcomp_index,bcomp_module,bcomp_name,bcomp_memo,bcomp_type,bcomp_range,bcomp_time_node,bcomp_state,bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit,reviser_name,reviser_username)
+            VALUES (2,'dept','legacy-existing','memo','2','1','3','1',1,'HASH',100,NULL,NULL);
+            INSERT INTO TSS_BCOMP_CONF_NEW
+              (bcomp_index,bcomp_module,bcomp_name,bcomp_memo,bcomp_type,bcomp_range,bcomp_time_node,bcomp_state)
+            VALUES (3,'dept','legacy-new','memo','2','1','3','1');
+            INSERT INTO TSS_BCOMP_FIELD_NEW
+              (bcomp_index,field_name,field_type,field_memo,field_old_index,field_new_index,field_index_flag,field_enum_flag)
+            VALUES (1,'ID','1','key',1,1,'1','0'),(2,'ID','1','key',1,1,'1','0'),
+                   (3,'ID','1','key',1,1,'1','0'),(4,'ID','1','key',1,1,'1','0');
+            INSERT INTO TSS_BCOMP_TABLE_SQL_NEW
+              (bcomp_index,orig_sql,orig_database_id,dest_sql,dest_database_id)
+            VALUES (1,'(select ID from T) orig',1,'(select ID from T) dest',2),
+                   (2,'(select ID from T) orig',1,'(select ID from T) dest',2),
+                   (3,'(select ID from T) orig',1,'(select ID from T) dest',2),
+                   (4,'(select ID from T) orig',1,'(select ID from T) dest',2);
+            COMMIT;
+            """;
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(script)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.configurationCount").value(4));
+        assertThat(jdbc.queryForList("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW ORDER BY BCOMP_INDEX",Integer.class))
+            .containsExactly(100,32,64,256);
+    }
+
+    @Test void invalidExplicitMaximumAndExtraSqlRollBackTheWholeReplacement() throws Exception {
+        mvc(()->{}).perform(post("/api/configurations").contentType(APPLICATION_JSON)
+                .content(withLimit(valid(22,"保留配置"),"128")))
+            .andExpect(status().isCreated());
+        var invalidScripts=new java.util.ArrayList<String>();
+        for(String limit:new String[]{"0","-1","257","1.5","NULL","'64'","999999999999999999999","CURRENT_USER"}) {
+            invalidScripts.add(maxPartitionScript(limit));
+        }
+        invalidScripts.add(maxPartitionScript("100").replace("bcomp_max_partition_num)","bcomp_max_partition_num,bcomp_max_partition_num)"));
+        invalidScripts.add(maxPartitionScript("100").replace("bcomp_max_partition_num)","unexpected_maximum)"));
+        invalidScripts.add(maxPartitionScript("100").replace("COMMIT;","UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=256;\nCOMMIT;"));
+        AtomicInteger reloads=new AtomicInteger();
+        var mvc=mvc(reloads::incrementAndGet);
+        for(String script:invalidScripts) {
+            mvc.perform(multipart("/api/configurations/import").file(scriptFile(script)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+            assertThat(jdbc.queryForObject("SELECT BCOMP_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=22",String.class)).isEqualTo("保留配置");
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=22",Integer.class)).isEqualTo(128);
+            assertThat(jdbc.queryForObject("SELECT ORIG_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=22",String.class)).isEqualTo("OLD_SQL");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Integer.class)).isEqualTo(1);
+        }
+        assertThat(reloads).hasValue(0);
+    }
+
     @Test void failedReplacingImportRollsBackRowsAndTheirPartitionLimits() throws Exception {
         var mvc=mvc(()->{});
         for(int index:new int[]{1,22}) mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON)
@@ -290,6 +384,12 @@ class ConfigurationApiTest {
         return sampleScript("100")
             .replace("bcomp_sample_limit)", "bcomp_sample_limit,reviser_name,reviser_username)")
             .replace("16,'HASH',100);", "16,'HASH',100,"+name+","+username+");");
+    }
+
+    String maxPartitionScript(String maximum) {
+        return reviserScript("'Excel负责人'","NULL")
+            .replace("reviser_username)","reviser_username,bcomp_max_partition_num)")
+            .replace("100,'Excel负责人',NULL);","100,'Excel负责人',NULL,"+maximum+");");
     }
 
     String scriptWithSqlExpressions(String origin, String destination) {

@@ -184,7 +184,9 @@ Axon 自定义 SQL 含反斜杠时，导出的 `orig_sql`、`dest_sql` 使用 `C
 
 在 bd 管理台单张表的配置编辑页设置“最大 HASH 分区数”，范围为 **1～256 的整数，默认 64**。每次运行仍精确统计两侧本次 SQL，以较大侧每百万行一档向上取二次幂，再与本表上限取较小值。例如 300 万行、上限 128 时用 4 分区；2 亿行、上限 100 时用 100 分区；空表用 1 分区。提高上限不会强制小表使用更多分区。两侧使用相同的实际分区数。
 
-该上限独立保存为 `BCOMP_MAX_PARTITION_NUM`，不复用历史 `BCOMP_PARTITION_NUM`。新建配置默认 64；复制配置继承上限；再次通过管理台导入 Axon 脚本时，相同配置编号保留 bd 已设置的上限，新编号默认 64。旧客户端修改配置遗漏该字段时保留原值。旧 8/10/11/13 列导入格式保持兼容。
+该上限独立保存为 `BCOMP_MAX_PARTITION_NUM`，不复用历史 `BCOMP_PARTITION_NUM`。新建配置默认 64；复制配置继承上限。旧 8/10/11/13 列 Axon 导入格式仍兼容：相同配置编号保留 bd 已设置的上限，新编号默认 64；旧客户端修改配置遗漏该字段时保留原值。
+
+Axon 命名方案的新 14 列主配置在原 13 列末尾追加 `bcomp_max_partition_num`，必须显式填写 1～256 的整数。新格式按脚本值覆盖已有上限（包括显式 64），不再恢复旧值；混合新旧主配置 INSERT 时逐条按是否声明该列处理。其余字段表、两侧 SQL、语句顺序及任意 SQL 拒绝规则保持。可对照 `compare-service/src/test/resources/axon-named-max-partition-config.sql` 的复合主键示例。
 
 已有环境升级：先停止 bd 并确认在途 Spark 作业结束，在服务和 Spark 使用的同一元数据库/schema 执行一次增量脚本：GaussDB/PostgreSQL 使用 `sql/add_bcomp_max_partition_num_new.sql`；GDB/MySQL 使用 `sql/add_bcomp_max_partition_num_gdb.sql`。旧配置上限初始化为 64，保留原配置与结果。先检查列是否已存在，部分执行后不要直接重跑；GDB/MySQL DDL 会隐式提交。随后同步部署新版服务、Spark JAR 和服务内嵌前端。全新空库使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql`。应用不自动执行迁移；缺列会明确失败。
 

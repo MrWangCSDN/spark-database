@@ -76,8 +76,10 @@ public class ConfigurationRepository {
                 }
                 jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_PARTITION_NUM=1 WHERE BCOMP_PARTITION_NUM IS NULL");
                 jdbc.update("UPDATE TSS_BCOMP_FIELD_NEW SET FIELD_PARTITION_FLAG='0'");
-                if(!limits.isEmpty()) jdbc.batchUpdate("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=? WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",
-                    limits.entrySet().stream().map(entry->new Object[]{entry.getValue(),entry.getKey()}).toList());
+                var legacyLimits=limits.entrySet().stream()
+                    .filter(entry->!parsed.explicitMaxPartitionIndexes().contains(entry.getKey()))
+                    .map(entry->new Object[]{entry.getValue(),entry.getKey()}).toList();
+                if(!legacyLimits.isEmpty()) jdbc.batchUpdate("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=? WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",legacyLimits);
                 return parsed;
             });
         } catch(cn.sunline.tss.compare.api.ApiException exception){throw exception;}
