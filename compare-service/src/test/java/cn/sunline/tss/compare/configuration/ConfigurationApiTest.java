@@ -216,6 +216,74 @@ class ConfigurationApiTest {
             .isEqualTo("(select TENANT_ID,ACCOUNT_ID,BALANCE from account_detail) orig");
     }
 
+    @Test void preservesImportedMetadataTextAsBoundValuesForPlainAndHexLiterals() throws Exception {
+        String memo="账户\\n明细\nO'Brien";
+        String owner="开发\\A'乙";
+        String fieldMemo="字段\\\\路径\r\n'引号'";
+        var mvc=mvc(()->{});
+        for(boolean hex:new boolean[]{false,true}) {
+            java.util.function.Function<String,String> literal=hex?this::utf8SqlExpression:
+                value->"'"+value.replace("'","''")+"'";
+            String script=maxPartitionScript("100")
+                .replace("'配置''说明'",literal.apply(memo))
+                .replace("'Excel负责人'",literal.apply(owner))
+                .replace("'主键'",literal.apply(fieldMemo));
+            mvc.perform(multipart("/api/configurations/import").file(scriptFile(script)))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("SELECT BCOMP_MEMO FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo(memo);
+            assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo(owner);
+            assertThat(jdbc.queryForObject("SELECT FIELD_MEMO FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=1 AND FIELD_NAME='ID'",String.class)).isEqualTo(fieldMemo);
+            var commands=new java.util.ArrayList<AxonConfigScriptParser.Command>();
+            new AxonConfigScriptParser().parse(new java.io.StringReader(script),commands::add);
+            var conf=commands.stream().filter(command->command.value().startsWith("INSERT INTO tss_bcomp_conf_new")).findFirst().orElseThrow();
+            var fields=commands.stream().filter(command->command.value().startsWith("INSERT INTO tss_bcomp_field_new")).findFirst().orElseThrow();
+            // Binding rather than raw SQL literals preserves backslashes on MySQL and avoids
+            // executing the MySQL-only CONVERT expression on a GaussDB or H2 metadata database.
+            assertThat(conf.parameters()).contains(memo,owner);
+            assertThat(fields.parameters()).contains(fieldMemo);
+            assertThat(conf.value()).doesNotContain("CONVERT(").doesNotContain("账户\\n");
+            assertThat(fields.value()).doesNotContain("CONVERT(").doesNotContain("字段\\\\");
+        }
+    }
+
+    @Test void importsTheActualNamedAxonSafeTextExportContract() throws Exception {
+        var mvc=mvc(()->{});
+        for(int id:new int[]{1,2}) {
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON)
+                    .content(withLimit(valid(id,"original"+id),id==1?"128":"32")))
+                .andExpect(status().isCreated());
+        }
+        byte[] script;
+        try(var input=new ClassPathResource("axon-named-safe-text-config.sql").getInputStream()) {
+            script=input.readAllBytes();
+        }
+        mvc.perform(multipart("/api/configurations/import").file(new MockMultipartFile("file","actual-axon.sql","application/sql",script)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.configurationCount").value(2))
+            .andExpect(jsonPath("$.fieldCount").value(4)).andExpect(jsonPath("$.tableSqlCount").value(2));
+        assertThat(jdbc.queryForList("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW ORDER BY BCOMP_INDEX",Integer.class)).containsExactly(100,256);
+        assertThat(jdbc.queryForObject("SELECT BCOMP_MEMO FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("账户\\明细'注比对");
+        assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("A\\nB");
+        assertThat(jdbc.queryForObject("SELECT BCOMP_MEMO FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=2",String.class)).isEqualTo("贷款\n明细比对");
+        assertThat(jdbc.queryForObject("SELECT FIELD_MEMO FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=1 AND FIELD_NAME='id'",String.class)).isEqualTo("编号\\代码'注");
+        assertThat(jdbc.queryForObject("SELECT FIELD_MEMO FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=2 AND FIELD_NAME='balance'",String.class)).isEqualTo("金额\n现值");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW WHERE FIELD_INDEX_FLAG='1'",Integer.class)).isEqualTo(2);
+    }
+
+    @Test void validatesDecodedHashStrategyButKeepsNumericColumnsExpressionFree() throws Exception {
+        var mvc=mvc(()->{});
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(maxPartitionScript("100")
+                .replace("'HASH'",utf8SqlExpression("HASH")))))
+            .andExpect(status().isOk());
+        for(String strategy:new String[]{"RANGE"," HASH","HASH "}) {
+            mvc.perform(multipart("/api/configurations/import").file(scriptFile(maxPartitionScript("100")
+                    .replace("'HASH'",utf8SqlExpression(strategy)))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        }
+        mvc.perform(multipart("/api/configurations/import").file(scriptFile(maxPartitionScript(utf8SqlExpression("64")))))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
+        assertThat(jdbc.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",Integer.class)).isEqualTo(100);
+    }
+
     @Test void mixedConfLayoutsRestoreOnlyRowsWithoutAnExplicitMaximum() throws Exception {
         var mvc=mvc(()->{});
         for(int index:new int[]{1,2}) {
@@ -456,7 +524,7 @@ class ConfigurationApiTest {
         assertThat(reloads).hasValue(1);
     }
 
-    @Test void rejectsInvalidHexSqlAndExpressionsOutsideSqlColumnsWithoutReplacingConfiguration() throws Exception {
+    @Test void rejectsMalformedTextHexAndExpressionsInNumericColumnsWithoutReplacingConfiguration() throws Exception {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
             .andExpect(status().isCreated());
         String validExpression=utf8SqlExpression("(select ID,UPDATED_AT from T where NOTE='中文\\路径') orig");
@@ -477,14 +545,16 @@ class ConfigurationApiTest {
         for(String expression:invalidExpressions) {
             invalidScripts.add(scriptWithSqlExpressions(expression,validExpression));
             invalidScripts.add(scriptWithSqlExpressions(validExpression,expression));
+            invalidScripts.add(maxPartitionScript("100").replace("'配置''说明'",expression));
+            invalidScripts.add(maxPartitionScript("100").replace("'Excel负责人'",expression));
+            invalidScripts.add(maxPartitionScript("100").replace("'主键'",expression));
         }
         String validScript=scriptWithSqlExpressions(validExpression,validExpression);
-        invalidScripts.add(validScript.replace("'配置''说明'",validExpression));
-        invalidScripts.add(validScript.replace("'UPDATED_AT'",validExpression));
-        invalidScripts.add(reviserScript(validExpression,"NULL"));
         invalidScripts.add(validScript.replace("16,'HASH',100",validExpression+",'HASH',100"));
         invalidScripts.add(validScript.replace("16,'HASH',100","16,'HASH',"+validExpression));
         invalidScripts.add(validScript.replace(validExpression+",1,",validExpression+","+validExpression+","));
+        invalidScripts.add(validScript.replace("(1,'dept'","("+validExpression+",'dept'"));
+        invalidScripts.add(validScript.replace("'主键', '1','1'","'主键', "+validExpression+",'1'"));
         AtomicInteger reloads=new AtomicInteger();
         var mvc=mvc(reloads::incrementAndGet);
         for(String script:invalidScripts) {

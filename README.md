@@ -188,6 +188,8 @@ Axon 自定义 SQL 含反斜杠时，导出的 `orig_sql`、`dest_sql` 使用 `C
 
 Axon 命名方案的新 14 列主配置在原 13 列末尾追加 `bcomp_max_partition_num`，必须显式填写 1～256 的整数。新格式按脚本值覆盖已有上限（包括显式 64），不再恢复旧值；混合新旧主配置 INSERT 时逐条按是否声明该列处理。其余字段表、两侧 SQL、语句顺序及任意 SQL 拒绝规则保持。可对照 `compare-service/src/test/resources/axon-named-max-partition-config.sql` 的复合主键示例。
 
+固定文本列中的单引号字面量和严格的 `CONVERT(0x… USING utf8mb4)` UTF-8 编码均先解码，再通过 JDBC 参数绑定保存，保留中文、引号、换行与反斜杠，不依赖 MySQL 转义模式或在 GaussDB 执行 `CONVERT`。数值列不接受该表达式，HASH 策略解码后仍必须为 HASH；任意其他函数、字符集、无效 UTF-8 或 NUL 仍被拒绝，整笔导入回滚。
+
 已有环境升级：先停止 bd 并确认在途 Spark 作业结束，在服务和 Spark 使用的同一元数据库/schema 执行一次增量脚本：GaussDB/PostgreSQL 使用 `sql/add_bcomp_max_partition_num_new.sql`；GDB/MySQL 使用 `sql/add_bcomp_max_partition_num_gdb.sql`。旧配置上限初始化为 64，保留原配置与结果。先检查列是否已存在，部分执行后不要直接重跑；GDB/MySQL DDL 会隐式提交。随后同步部署新版服务、Spark JAR 和服务内嵌前端。全新空库使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql`。应用不自动执行迁移；缺列会明确失败。
 
 Axon-link 样本上限仍可由授权人员配置（0–10000，默认 100，0 表示只保存汇总）。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单。Axon 历史分区数接口和字段只作兼容，不能影响 bd 的实际运行分区数。

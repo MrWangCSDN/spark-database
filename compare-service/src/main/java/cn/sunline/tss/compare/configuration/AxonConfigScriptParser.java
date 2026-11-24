@@ -29,6 +29,9 @@ final class AxonConfigScriptParser {
     private static final List<List<String>> CONF_LAYOUTS = List.of(CONF_COLUMNS,HASH_CONF_COLUMNS,SAMPLE_CONF_COLUMNS,REVISER_CONF_COLUMNS,MAX_PARTITION_CONF_COLUMNS);
     private static final List<String> FIELD_COLUMNS = List.of("bcomp_index","field_name","field_type","field_memo","field_old_index","field_new_index","field_index_flag","field_enum_flag");
     private static final List<String> SQL_COLUMNS = List.of("bcomp_index","orig_sql","orig_database_id","dest_sql","dest_database_id");
+    private static final Set<String> TEXT_COLUMNS = Set.of("bcomp_module","bcomp_name","bcomp_memo","bcomp_type",
+        "bcomp_range","bcomp_time_node","bcomp_state","bcomp_shard_strategy","reviser_name","reviser_username",
+        "field_name","field_type","field_memo","field_index_flag","field_enum_flag","orig_sql","dest_sql");
 
     ParseResult parse(Reader source, Consumer<Command> executor) {
         State state = new State();
@@ -127,8 +130,8 @@ final class AxonConfigScriptParser {
         boolean hashConfiguration = phase == 0 && columns.size() >= HASH_CONF_COLUMNS.size();
         boolean maxPartitionConfiguration = phase == 0 && columns.equals(MAX_PARTITION_CONF_COLUMNS);
         boolean reviserConfiguration = phase == 0 && (columns.equals(REVISER_CONF_COLUMNS) || maxPartitionConfiguration);
-        ParsedValues values = parseLiteralRows(matcher.group(3), expected.size(), hashConfiguration, reviserConfiguration,
-            maxPartitionConfiguration, phase == 2);
+        ParsedValues values = parseLiteralRows(matcher.group(3), expected, hashConfiguration, reviserConfiguration,
+            maxPartitionConfiguration);
         int rows = values.rows();
         state.hasHashConfigurations |= hashConfiguration;
         state.explicitMaxPartitionIndexes.addAll(values.explicitMaxPartitionIndexes());
@@ -138,8 +141,9 @@ final class AxonConfigScriptParser {
         executor.accept(Command.insert(statement.substring(0, matcher.start(3)) + values.sql(), values.parameters()));
     }
 
-    private ParsedValues parseLiteralRows(String values, int columnCount, boolean hashConfiguration,
-                                          boolean reviserConfiguration, boolean maxPartitionConfiguration, boolean tableSql) {
+    private ParsedValues parseLiteralRows(String values, List<String> columnNames, boolean hashConfiguration,
+                                          boolean reviserConfiguration, boolean maxPartitionConfiguration) {
+        int columnCount=columnNames.size();
         int position=0, rows=0, copiedThrough=0;
         StringBuilder sql=new StringBuilder(values.length());
         List<String> parameters=new ArrayList<>();
@@ -155,16 +159,16 @@ final class AxonConfigScriptParser {
                 if (position>=values.length()) invalid();
                 int tokenStart = position;
                 char c=values.charAt(position);
-                boolean queryColumn=tableSql && (columns==1 || columns==3);
-                String queryValue=null;
+                boolean textColumn=columns<columnCount && TEXT_COLUMNS.contains(columnNames.get(columns));
+                String textValue=null;
                 if (c=='\'') {
                     position=stringLiteral(values,position);
-                    if(queryColumn) queryValue=values.substring(tokenStart+1,position-1).replace("''","'");
+                    if(textColumn) textValue=values.substring(tokenStart+1,position-1).replace("''","'");
                 }
-                else if (queryColumn && (c=='C' || c=='c')) {
+                else if (textColumn && (c=='C' || c=='c')) {
                     Matcher encoded=UTF8_HEX_VALUE.matcher(values).region(position,values.length());
                     if(!encoded.lookingAt()) invalid();
-                    queryValue=decodeUtf8Hex(encoded.group(1));
+                    textValue=decodeUtf8Hex(encoded.group(1));
                     position=encoded.end();
                 }
                 else if (reviserConfiguration && columns >= SAMPLE_CONF_COLUMNS.size() && columns < REVISER_CONF_COLUMNS.size()) {
@@ -177,13 +181,13 @@ final class AxonConfigScriptParser {
                     while(position<values.length() && Character.isDigit(values.charAt(position))) position++;
                     if(position==start || (c=='-' && position==start+1)) invalid();
                 }
-                if(queryValue!=null) {
+                if(textValue!=null) {
                     sql.append(values,copiedThrough,tokenStart).append('?');
                     copiedThrough=position;
-                    parameters.add(queryValue);
+                    parameters.add(textValue);
                 }
                 if (hashConfiguration && columns == 8) validatePartitionCount(values.substring(tokenStart, position));
-                if (hashConfiguration && columns == 9 && !"'HASH'".equalsIgnoreCase(values.substring(tokenStart, position))) invalid();
+                if (hashConfiguration && columns == 9 && !"HASH".equalsIgnoreCase(textValue)) invalid();
                 if (hashConfiguration && columns == 10) validateSampleLimit(values.substring(tokenStart, position));
                 if (maxPartitionConfiguration && columns == 0) configurationIndex=configurationIndex(values.substring(tokenStart, position));
                 if (maxPartitionConfiguration && columns == 13) validatePartitionCount(values.substring(tokenStart, position));
