@@ -65,6 +65,8 @@ Spark Core/SQL 不进入服务依赖或作业包，由 Spark 集群提供。Spar
 
 Spark 3.4.0 集群使用 `-Pspark-3.4` 构建，配套作业模块 Jackson 2.14.2。默认构建使用 Spark 3.5.3 和作业模块 Jackson 2.15.2。两种构建均保持服务独立的 Spring Boot Jackson 依赖管理。
 
+核对键可以来自包含 NULL 的唯一索引。GaussDB 的 Oracle 兼容语义会把空字符串视为 NULL，因此 HASH 对每个数值结果单独执行 `COALESCE(...,0)`，确保任一索引字段为空时，该行仍落入一个读取分区；空键记录继续按实际出现次数参与全量统计。运行前的单行 HASH 探测若返回 NULL 或越界桶号，任务直接失败，避免把无效读取计划当作正常结果发布。
+
 `SparkJobLauncher` 显式传递应用配置中的非空 `spark.local.dir`，支持逗号分隔多个目录。Standalone Executor 的缓存目录由运行节点的 Worker 环境决定，各 Worker 应在实际使用的 `spark-env.sh` 设置 `SPARK_LOCAL_DIRS`，等待在途任务结束后重启 Worker，再发起新任务。默认提交 `spark.rdd.compress=true` 压缩序列化 RDD 缓存，可在应用配置中显式设为 `false`。每个 Executor 首次读取时记录实际 `blockmgr` 目录、可用/总字节数和压缩开关。两阶段比较会缓存完整分组数据，磁盘预算需结合全量行数、行宽及压缩率评估。部署检查见 [内网源码构建说明](docs/migration/intranet-build.md)。
 
 ## 管理台

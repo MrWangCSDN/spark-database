@@ -73,7 +73,11 @@ final class PrimaryKeyHashPlanner {
         try (Statement statement = connection.createStatement()) {
             statement.setMaxRows(1);
             try (ResultSet rs = statement.executeQuery("SELECT " + bucket + " FROM " + source)) {
-                if (rs.next()) rs.getInt(1);
+                if (rs.next()) {
+                    int bucketId=rs.getInt(1);
+                    if (rs.wasNull() || bucketId<0 || bucketId>=count)
+                        throw new SQLException("HASH探测返回NULL或越界分区号，拒绝不完整的分区读取");
+                }
             }
         }
         String[] predicates = new String[count];
@@ -125,10 +129,11 @@ final class PrimaryKeyHashPlanner {
     }
 
     enum Dialect {
-        POSTGRES { String hash(String key) { return "CAST(hashtext(COALESCE(CAST("+key+" AS TEXT), '')) AS BIGINT)"; } },
+        // GaussDB Oracle-compatible modes treat '' as NULL; guard every numeric hash, not just its text input.
+        POSTGRES { String hash(String key) { return "COALESCE(CAST(hashtext(COALESCE(CAST("+key+" AS TEXT), '')) AS BIGINT), 0)"; } },
         ORACLE { String hash(String key) { return "COALESCE(ORA_HASH("+key+"), 0)"; } },
         MYSQL { String hash(String key) { return "CAST(CRC32(COALESCE(CAST("+key+" AS CHAR), '')) AS DECIMAL(38,0))"; } },
-        H2 { String hash(String key) { return "CAST(ORA_HASH(COALESCE(CAST("+key+" AS VARCHAR), '')) AS BIGINT)"; } };
+        H2 { String hash(String key) { return "COALESCE(CAST(ORA_HASH(COALESCE(CAST("+key+" AS VARCHAR), '')) AS BIGINT), 0)"; } };
         abstract String hash(String key);
     }
 }
