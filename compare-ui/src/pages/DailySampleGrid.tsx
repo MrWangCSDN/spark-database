@@ -20,7 +20,7 @@ export function DailySampleGrid({ samples, type, originName, destinationName, pa
   samples: DailySamples; type: string; originName: string; destinationName: string; patternFields?: string[]
 }) {
   const columns = columnsFor(samples, patternFields)
-  return <div className="table-wrap daily-sample-grid" role="region" aria-label="差异样本宽表" tabIndex={0}>
+  return <div className="table-wrap daily-sample-grid" role="region" aria-label={samples.summary.detailLimit === -1 ? '差异明细宽表' : '差异样本宽表'} tabIndex={0}>
     {type === '4' && <div className="sample-compare-legend"><span>{originName} → {destinationName}</span><small>底色标记不同字段</small></div>}
     <table><thead><tr><th>核对主键</th>{columns.map(column => <th key={column.name} title={column.name}>
       <span>{column.label}</span>{column.label !== column.name && <small>{column.name}</small>}

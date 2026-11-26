@@ -143,3 +143,101 @@ test('does not fall back to legacy samples when only collapsed patterns remain',
   expect(screen.queryByText(/请重新执行核对/)).not.toBeInTheDocument()
   expect(requested).toEqual([null])
 })
+
+test('browses all full-mode field differences including overflow and keeps group shortcuts', async () => {
+  const full = { ...daily, detailLimit: -1, onlyOriginCount: 1, originSamples: 1, onlyDestinationCount: 1, destinationSamples: 1, differentCount: 20101, differentSamples: 20101 }
+  const requests: string[] = []
+  server.use(
+    http.get('/api/results/1/20260920', () => HttpResponse.json(full)),
+    http.get('/api/results/1/20260920/field-patterns', () => HttpResponse.json([
+      { patternId: 'balance', fields: ['balance'], differentCount: 20001, sampleCount: 20001, collapsedPatternCount: 1 },
+      { patternId: '__OTHER__', fields: [], differentCount: 100, sampleCount: 100, collapsedPatternCount: 130 }
+    ])),
+    http.get('/api/results/1/20260920/differences', ({ request }) => {
+      const params = new URL(request.url).searchParams
+      expect(params.get('size')).toBe('100')
+      const page = Number(params.get('page')), pattern = params.get('patternId'), type = params.get('type')
+      requests.push(`${type}:${pattern}:${page}`)
+      return HttpResponse.json({ summary: full, items: [{ businessKey: `${type}-${pattern ?? 'all'}-${page}`, detail: { fields: [{ name: pattern ? 'balance' : 'overflow_field', label: pattern ? '余额' : '折叠组合字段', originValue: '100', destinationValue: '200' }], truncated: false } }], page, size: 100, total: type === '4' ? pattern ? 20001 : 20101 : 1 })
+    })
+  )
+  const user = userEvent.setup()
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  expect(await screen.findByText('全量')).toBeVisible()
+  expect(screen.queryByText('-1 条')).not.toBeInTheDocument()
+  expect(screen.getByText(/过长字段值或过多字段仍可能截断展示/)).toBeVisible()
+  await user.click(screen.getByRole('tab', { name: /主键相同、字段不同/ }))
+  const all = await screen.findByRole('button', { name: /全部字段差异/ })
+  expect(all).toHaveAttribute('aria-pressed', 'true')
+  expect(await screen.findByRole('columnheader', { name: /折叠组合字段/ })).toBeVisible()
+  expect(screen.getByRole('region', { name: '差异明细宽表' })).toBeVisible()
+  expect(screen.getByText(/其余 130 种组合，共 100 条差异/)).toHaveTextContent('全部字段差异')
+  expect(screen.queryByText(/未保存样本/)).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '下一页' }))
+  expect(await screen.findByText(/第 2 \/ 202 页/)).toBeVisible()
+  expect(await screen.findByText('4-all-1')).toBeVisible()
+  expect(requests).toContain('4:null:0')
+  expect(requests).toContain('4:null:1')
+  await user.click(screen.getByRole('button', { name: /\[balance\]/ }))
+  expect(await screen.findByRole('columnheader', { name: /余额/ })).toBeVisible()
+  expect(await screen.findByText(/第 1 \/ 201 页/)).toBeVisible()
+  expect(requests).toContain('4:balance:0')
+  await user.click(screen.getByRole('button', { name: /全部字段差异/ }))
+  expect(await screen.findByRole('columnheader', { name: /折叠组合字段/ })).toBeVisible()
+  expect(await screen.findByText(/第 1 \/ 202 页/)).toBeVisible()
+  expect(requests).not.toContain('4:__OTHER__:0')
+})
+
+test('keeps full-mode rows visible when only the overflow pattern remains', async () => {
+  const full = { ...daily, detailLimit: -1, differentCount: 40, differentSamples: 40 }
+  const requestedTypes: string[] = []
+  server.use(
+    http.get('/api/results/1/20260920', () => HttpResponse.json(full)),
+    http.get('/api/results/1/20260920/field-patterns', () => HttpResponse.json([
+      { patternId: '__OTHER__', fields: [], differentCount: 40, sampleCount: 40, collapsedPatternCount: 140 }
+    ])),
+    http.get('/api/results/1/20260920/differences', ({ request }) => {
+      const params = new URL(request.url).searchParams
+      requestedTypes.push(params.get('type') ?? '')
+      expect(params.get('patternId')).toBeNull()
+      return HttpResponse.json({ summary: full, items: [{ businessKey: 'overflow-only-key', detail: { fields: [], truncated: false } }], page: 0, size: 100, total: 40 })
+    })
+  )
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  await userEvent.setup().click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
+  expect(await screen.findByRole('button', { name: /全部字段差异/ })).toHaveAttribute('aria-pressed', 'true')
+  expect(await screen.findByText('overflow-only-key')).toBeVisible()
+  expect(requestedTypes).toContain('4')
+  expect(screen.queryByText(/请重新执行核对/)).not.toBeInTheDocument()
+})
+
+test('preserves zero-limit summary wording', async () => {
+  mock()
+  server.use(http.get('/api/results/1/20260920', () => HttpResponse.json({ ...daily, detailLimit: 0, originSamples: 0 })))
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  expect(await screen.findByText('每组样本上限')).toBeVisible()
+  expect(screen.getByText('0 条')).toBeVisible()
+  expect(screen.getByText(/其余明细未保存，汇总已包含全部差异/)).toBeVisible()
+  expect(screen.queryByText(/过长字段值或过多字段仍可能截断展示/)).not.toBeInTheDocument()
+})
+
+test('uses detail wording for full-mode entries on the daily list', async () => {
+  mock()
+  server.use(http.get('/api/results', () => HttpResponse.json({ results: { items: [{ ...daily, detailLimit: -1 }], total: 1, page: 0, size: 20 }, connections: [{ ...daily, objectCount: 1 }] })))
+  renderPage(<DailyResultsPage />, '/results?date=20260920')
+  expect(await screen.findByRole('link', { name: '查看明细' })).toHaveAttribute('href', '/results/1/20260920')
+  expect(screen.getByText(/明细按配置保存为限额样本或全量差异/)).toBeVisible()
+})
+
+
+test('describes expired full details without claiming the rows are still saved', async () => {
+  const expired = { ...daily, detailLimit: -1, detailsExpired: '1', originSamples: 0, destinationSamples: 0, differentSamples: 0 }
+  server.use(
+    http.get('/api/results/1/20260920', () => HttpResponse.json(expired)),
+    http.get('/api/results/1/20260920/differences', () => HttpResponse.json({ summary: expired, items: [], page: 0, size: 100, total: 0 }))
+  )
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  expect(await screen.findByText('明细已按保留期限清理，全量汇总仍保留。')).toBeVisible()
+  expect(screen.queryByText(/已保存全部差异明细/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/样本已按保留期限清理/)).not.toBeInTheDocument()
+})
