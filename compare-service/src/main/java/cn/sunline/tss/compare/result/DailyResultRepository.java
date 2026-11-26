@@ -33,7 +33,7 @@ public class DailyResultRepository {
         rs.getString("ORIGIN_DATABASE_NAME"),rs.getObject("DESTINATION_DATABASE_ID",Long.class),rs.getString("DESTINATION_DATABASE_NAME"),
         rs.getLong("ORIGIN_COUNT"),rs.getLong("DESTINATION_COUNT"),rs.getLong("MATCHED_COUNT"),rs.getLong("ONLY_ORIGIN_COUNT"),
         rs.getLong("ONLY_DESTINATION_COUNT"),rs.getLong("DIFFERENT_COUNT"),rs.getInt("DETAIL_LIMIT"),rs.getLong("ORIGIN_SAMPLES"),
-        rs.getLong("DESTINATION_SAMPLES"),rs.getLong("DIFFERENT_SAMPLES"),rs.getString("PUBLISHED_AT"),rs.getString("DETAILS_EXPIRED"));
+        rs.getLong("DESTINATION_SAMPLES"),rs.getLong("DIFFERENT_SAMPLES"),rs.getString("PUBLISHED_AT"),rs.getString("DETAILS_EXPIRED"),rs.getString("SOURCE_TABLE_NAME"),rs.getString("CONFIGURATION_DISPLAY_NAME"),rs.getString("CONFIGURATION_SCOPE"));
     public DailyResultRepository(DataSource source,ObjectMapper json) {
         this(source, json, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
     }
@@ -61,7 +61,7 @@ public class DailyResultRepository {
             String value=contains(domain);args.add(value);args.add(value);
         }
         if(configurationName!=null&&!configurationName.isBlank()) {
-            where.append(" AND LOWER(COALESCE(CONFIGURATION_NAME,'')) LIKE ? ESCAPE '!'");args.add(contains(configurationName));
+            where.append(" AND (LOWER(COALESCE(CONFIGURATION_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(SOURCE_TABLE_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(CONFIGURATION_DISPLAY_NAME,'')) LIKE ? ESCAPE '!')");String value=contains(configurationName);args.add(value);args.add(value);args.add(value);
         }
         if(reviser!=null&&!reviser.isBlank()) {
             where.append(" AND (LOWER(COALESCE(REVISER_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(REVISER_USERNAME,'')) LIKE ? ESCAPE '!')");

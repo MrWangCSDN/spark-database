@@ -166,7 +166,7 @@ WHERE table_schema = current_schema()
 ORDER BY table_name, ordinal_position;
 ```
 
-每日结果表、字段组合表及领域快照应已存在，字段组合表需有 `COLLAPSED_PATTERN_COUNT`。缺失时先按字段统计脚本注释补对应数据库的前置迁移。各增量按实际结构执行一次，部分执行过的脚本应检查后只执行缺失语句。GDB/MySQL 的 DDL 会隐式提交。全新空库直接使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql` 建齐十七张表。
+每日结果表、字段组合表及领域快照应已存在，字段组合表需有 `COLLAPSED_PATTERN_COUNT`。缺失时先按字段统计脚本注释补对应数据库的前置迁移。各增量按实际结构执行一次，部分执行过的脚本应检查后只执行缺失语句。GDB/MySQL 的 DDL 会隐式提交。全新空库直接使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql` 建齐十九张表。
 
 升级全量差异模式时，停服并等待在途 Spark 任务结束，根据元库选择 `sql/add_bcomp_full_details_new.sql`（GaussDB）或 `sql/add_bcomp_full_details_gdb.sql`（GDB/MySQL）。确认运行标识、暂存、获胜分区三张表均已创建，差异明细序号及已存数量列已扩为 BIGINT，再同时部署服务、Spark JAR 和内嵌前端。全量比对和清理需要暂存及结果表的读写权限和事务日志空间。
 
@@ -206,3 +206,13 @@ tar -tzf target/tss-compare-1.0.0-SNAPSHOT.tar.gz \
 部署时在 `config/bd.env` 中填写 `TSS_METADATA_PASSWORD='ENC(...)'`。使用 `bin/encrypt-password.sh` 从终端读取元库明文密码并生成密文；加密与运行时都需由外部环境注入同一个 `JASYPT_ENCRYPTOR_PASSWORD`，不要把口令写入源码包或 `bd.env`。启动后检查 BES 的 WebServer 日志和管理台/API 实际可访问；仅通过 Maven 构建不能证明厂商容器运行兼容。
 
 真实 GaussDB、Spark Master、厂商驱动和生产配置不属于源码构建条件，必须在部署验收阶段单独提供和验证。
+
+### 同表多配置固定身份升级（NEW17）
+
+在本项目现行全量明细结构基础上，先排空任务并停止服务，再按元库类型执行一次 `sql/add_bcomp_configuration_identity_new.sql` 或 `sql/add_bcomp_configuration_identity_gdb.sql`。增量为配置和结果增加三个展示元信息，并创建永久映射表 `TSS_BCOMP_CONFIG_ID_NEW` 与编号分配器 `TSS_BCOMP_CONFIG_ALLOC_NEW`；配置旧行回填自身代码，历史结果的新元信息保持NULL。新建空库使用最新 `create_bcomp_*` 一次建齐十九张表，分配器包含初始化游标；已有库不要重复运行全量DDL。
+
+服务和Spark必须一同更新，预编译前端随服务一起交付。**NEW17脚本必须通过管理台配置导入或 `/api/configurations/import` 上传，不能直接向元数据库执行替换脚本。** 文件中的编号仅作包内关联，服务会按固定 `BCOMP_NAME` 永久映射三张配置表的内部编号。旧NEW格式仍可上传，删除配置不回收内部编号，历史结果不会因包内顺序变化而改派。
+
+这两张永久身份表不能加入运行数据清理。首次导入会保留当前及历史占号；若同一编号/代码的旧历史存在歧义，返回 `CONFIGURATION_IDENTITY_AMBIGUOUS` 并回滚整批。应先核对旧数据的实际身份关系，再按明确映射修复；不能通过清空注册表消除错误。GDB/MySQL DDL隐式提交，部分执行后需检查实际结构再补缺失语句。
+
+结果的旧 `CONFIGURATION_NAME`/`configurationName` 和Excel“表”列继续是固定代码。人类名称使用新增 `CONFIGURATION_DISPLAY_NAME`/`configurationDisplayName`，Excel“真实表名、配置名称、查询条件”追加在两个明细Sheet旧列之后；历史空元信息保留空白，不按当前SQL猜测。

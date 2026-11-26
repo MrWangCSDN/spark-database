@@ -8,7 +8,7 @@
 
 ## 不变的兼容边界
 
-通过 `sql/create_bcomp_new.sql` 新建十七张空表，包含九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表、一张完整字段统计表和三张全量明细暂存相关表。枚举、忽略值和差异字段依赖同样使用独占新表。
+通过 `sql/create_bcomp_new.sql` 新建十九张独立表（业务表为空，编号分配器含一行初始状态），包含九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表、一张完整字段统计表、三张全量明细暂存相关表和两张永久配置身份/编号分配表。枚举、忽略值和差异字段依赖同样使用独占新表。
 
 | 运行时表 | 用途 |
 |---|---|
@@ -238,7 +238,7 @@ Spark Driver 按阶段创建、关闭元数据库连接：启动时读取分区/
 
 ## 九张业务表隔离部署
 
-执行 `sql/create_bcomp_new.sql` 创建十七张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
+执行 `sql/create_bcomp_new.sql` 创建十九张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
 
 停止 bd 并等待在途 Spark 作业结束后，同步替换 service 和 Spark 两个 JAR。在数据库连接页面重新维护连接（Axon 脚本使用 ID 1 和 2），从 Axon 选择“新版本（_new 表）”下载并导入配置，再创建小任务测试。旧版本 SQL 不可导入本版 bd。枚举、忽略值及差异字段表均使用 `_NEW` 表；规则表初始为空，启用规则前需维护相应数据。
 
@@ -264,7 +264,7 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 
 批次详情按等待、运行、一致、有差异、执行失败、已取消分别展示。进度按已结束任务数计算。点击“停止批次”并确认后，当前批次等待或运行的任务进入取消状态，服务向其正在运行的 Spark 应用发送终止请求；其他批次和已完成结果不受影响。停止请求返回后仍应在 Spark 页面核实应用终态。重新发起失败项会建立新批次，保留原业务日期、每项核验日期和时点，使用当前配置，配置变化时提示；有差异及已取消任务不属于失败项，不覆盖旧任务与明细。批次保存任务名称和配置摘要，后续重新导入不影响历史列表。
 
-**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用最新 `sql/create_bcomp_new.sql` 一次建齐十七张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
+**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用最新 `sql/create_bcomp_new.sql` 一次建齐十九张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
 
 现有单表任务仍在 `/tasks` 查询；批次页面只展示本功能创建的批次。控制面变更在单个服务实例内串行化，当前部署按单实例运行；不要同时通过另一实例或外部 SQL 修改正在使用的配置。
 
@@ -296,3 +296,15 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 新版 Spark 按全量字段差异行累计各字段出现次数，涵盖被折叠的字段组合，样本过期后仍可导出。历史结果有完整组合统计时可以精确回退，存在折叠或缺少完整统计时返回 `FIELD_COUNTS_UNAVAILABLE`，须用新版 Spark 重跑对应日期后导出。
 
 已有库需要补齐 `TSS_BCOMP_FIELD_COUNT_NEW`，以及结果表的 `FIELD_COUNTS_VERSION`、`FIELD_COUNTS_SIZE`、`REVISER_NAME`、`REVISER_USERNAME`。GaussDB 使用 `sql/add_bcomp_field_counts_new.sql` 和 `sql/add_bcomp_result_reviser_new.sql`，GDB/MySQL 使用对应 `_gdb.sql`。升级前检查实际结构，执行缺失的迁移，同时部署 service、Spark JAR 和内嵌前端。新建库直接使用最新完整建表脚本。操作顺序见 [内网源码构建说明](docs/migration/intranet-build.md)。
+
+### 同表多配置与永久编号
+
+Axon NEW17 脚本保留 `BCOMP_NAME` 为固定配置标识（例如 `a`、`a_1`），追加真实表名、可读配置名称和查询条件。两条配置可以查询同一张真实表，各自保存 SQL、字段统计和每日最后一次成功结果；条件重叠的记录分别计算。
+
+**请通过管理台“导入 Axon 配置”或 `/api/configurations/import` 上传脚本。** 脚本中的 `bcomp_index` 只负责包内三表关联；BD 按固定标识永久映射为内部编号。直接向元数据库执行替换脚本会绕开这项映射，不能保证历史隔离。旧8/10/11/13/14列NEW文件继续可导入。
+
+升级前停止等待和运行任务，先按元数据库类型执行一次 `sql/add_bcomp_configuration_identity_new.sql`（PostgreSQL/Gauss）或 `sql/add_bcomp_configuration_identity_gdb.sql`（GDB/MySQL），再一起更新服务与Spark作业。GDB DDL会隐式提交，重试前应核对实际字段和表。空库使用更新后的 `create_bcomp_*`，不再重复执行增量SQL。
+
+永久注册表 `TSS_BCOMP_CONFIG_ID_NEW` 和分配器 `TSS_BCOMP_CONFIG_ALLOC_NEW` 不可随配置替换、运行数据清理或删除配置而清空。首次导入会核对当前配置、每日结果和批次名称快照，保留所有历史引用过的编号；同一编号出现多个固定标识或同一标识出现多个编号时返回 `CONFIGURATION_IDENTITY_AMBIGUOUS`，整批回滚，需要先核对旧数据的身份关系。固定配置标识不可在编辑页改名，可读名称可编辑。
+
+每日结果沿用 `configurationName`/`CONFIGURATION_NAME` 表示固定标识，追加 `sourceTableName`、`configurationDisplayName` 和 `configurationScope` 的执行开始快照。报表的旧“表”列仍为固定标识，原列位置保持；“表明细”和“表字段明细”尾部追加“真实表名、配置名称、查询条件”。超过Excel单格32767字符的条件带明确截断标记，数据库和API保留完整快照。

@@ -32,8 +32,8 @@ public class ConfigurationRepository {
     }
 
     ConfigurationDetail find(long index){
-        List<BasicConfiguration> basics=jdbc.query("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",
-            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9),MaxPartitionNum.fromMetadata(rs.getObject(10))),index);
+        List<BasicConfiguration> basics=jdbc.query("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM,SOURCE_TABLE_NAME,CONFIGURATION_NAME,CONFIGURATION_SCOPE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",
+            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9),MaxPartitionNum.fromMetadata(rs.getObject(10)),rs.getString(11),rs.getString(12),rs.getString(13)),index);
         if(basics.isEmpty())return null;
         TableSqlConfiguration sql=jdbc.queryForObject("SELECT ORIG_DATABASE_ID,DEST_DATABASE_ID,ORIG_SQL,DEST_SQL FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=?",
             (rs,n)->new TableSqlConfiguration(rs.getLong(1),rs.getLong(2),rs.getString(3),rs.getString(4)),index);
@@ -47,14 +47,15 @@ public class ConfigurationRepository {
         String where=" WHERE BCOMP_TYPE='2'";
         var parameters=new ArrayList<Object>();
         if(keyword!=null&&!keyword.isBlank()){
-            where+=" AND LOWER(BCOMP_NAME) LIKE ? ESCAPE '!'";
-            parameters.add("%"+keyword.toLowerCase(Locale.ROOT).replace("!","!!").replace("%","!%").replace("_","!_")+"%");
+            where+=" AND (LOWER(BCOMP_NAME) LIKE ? ESCAPE '!' OR LOWER(COALESCE(SOURCE_TABLE_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(CONFIGURATION_NAME,'')) LIKE ? ESCAPE '!')";
+            String filter="%"+keyword.toLowerCase(Locale.ROOT).replace("!","!!").replace("%","!%").replace("_","!_")+"%";
+            parameters.add(filter);parameters.add(filter);parameters.add(filter);
         }
         Long total=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW"+where,Long.class,parameters.toArray());
-        var pageSql=dialect.page("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW"+where+" ORDER BY BCOMP_INDEX",(long)page*size,size);
+        var pageSql=dialect.page("SELECT BCOMP_INDEX,BCOMP_NAME,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM,SOURCE_TABLE_NAME,CONFIGURATION_NAME,CONFIGURATION_SCOPE FROM TSS_BCOMP_CONF_NEW"+where+" ORDER BY BCOMP_INDEX",(long)page*size,size);
         parameters.addAll(pageSql.parameters());
         List<BasicConfiguration> items=jdbc.query(pageSql.sql(),
-            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9),MaxPartitionNum.fromMetadata(rs.getObject(10))),parameters.toArray());
+            (rs,n)->new BasicConfiguration(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),(Integer)rs.getObject(8),rs.getString(9),MaxPartitionNum.fromMetadata(rs.getObject(10)),rs.getString(11),rs.getString(12),rs.getString(13)),parameters.toArray());
         return new PageResult<>(items,page,size,total==null?0:total);
     }
 
@@ -66,13 +67,17 @@ public class ConfigurationRepository {
             return transaction.execute(status->{
                 Integer active=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW WHERE TASK_STATE IN ('1','2')",Integer.class);
                 if(active!=null&&active>0)throw cn.sunline.tss.compare.api.ApiException.conflict("CONFIG_IMPORT_TASKS_ACTIVE","存在等待或运行任务，不能替换核对配置");
+                var identities=new StableConfigurationIds(jdbc);identities.bootstrap();
+                var metadata=new HashMap<Long,String[]>();
+                jdbc.query("SELECT BCOMP_INDEX,SOURCE_TABLE_NAME,CONFIGURATION_NAME,CONFIGURATION_SCOPE FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2'",
+                    (org.springframework.jdbc.core.RowCallbackHandler)rs->metadata.put(rs.getLong(1),new String[]{rs.getString(2),rs.getString(3),rs.getString(4)}));
                 var limits=new HashMap<Long,Integer>();
                 jdbc.query("SELECT BCOMP_INDEX,BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_TYPE='2'",
                     (org.springframework.jdbc.core.RowCallbackHandler)rs->limits.put(rs.getLong(1),MaxPartitionNum.fromMetadata(rs.getObject(2))));
                 var parsed=parser.parse(reader,command->{
                     if(command.kind()==AxonConfigScriptParser.Kind.CLEAR)jdbc.update("DELETE FROM "+command.value());
                     else jdbc.update(command.value(),command.parameters().toArray());
-                });
+                },identities::resolve);
                 Long configurations=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_CONF_NEW",Long.class);
                 Long fields=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FIELD_NEW",Long.class);
                 Long sqls=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TABLE_SQL_NEW",Long.class);
@@ -90,6 +95,8 @@ public class ConfigurationRepository {
                     .filter(entry->!parsed.explicitMaxPartitionIndexes().contains(entry.getKey()))
                     .map(entry->new Object[]{entry.getValue(),entry.getKey()}).toList();
                 if(!legacyLimits.isEmpty()) jdbc.batchUpdate("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=? WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",legacyLimits);
+                for(var entry:metadata.entrySet()) jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET SOURCE_TABLE_NAME=COALESCE(SOURCE_TABLE_NAME,?),CONFIGURATION_NAME=COALESCE(CONFIGURATION_NAME,?),CONFIGURATION_SCOPE=COALESCE(CONFIGURATION_SCOPE,?) WHERE BCOMP_INDEX=?",entry.getValue()[0],entry.getValue()[1],entry.getValue()[2],entry.getKey());
+                jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET SOURCE_TABLE_NAME=COALESCE(SOURCE_TABLE_NAME,BCOMP_NAME),CONFIGURATION_NAME=COALESCE(CONFIGURATION_NAME,BCOMP_NAME)");
                 return parsed;
             });
         } catch(cn.sunline.tss.compare.api.ApiException exception){throw exception;}
@@ -98,6 +105,7 @@ public class ConfigurationRepository {
 
     void insert(ConfigurationCommand command,Long copySource) {
         transaction.executeWithoutResult(status->{
+            var identities=new StableConfigurationIds(jdbc);identities.bootstrap();identities.register(command.basic().bcompIndex(),command.basic().name());
             insertBasic(command.basic());
             if(copySource!=null) {
                 Integer limit=jdbc.queryForObject("SELECT BCOMP_SAMPLE_LIMIT FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?",Integer.class,copySource);
@@ -109,12 +117,12 @@ public class ConfigurationRepository {
     }
     void update(ConfigurationCommand command){transaction.executeWithoutResult(status->{
         BasicConfiguration b=command.basic();
-        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_NAME=?,BCOMP_MODULE=?,BCOMP_MEMO=?,BCOMP_RANGE=?,BCOMP_TIME_NODE=?,BCOMP_STATE=?,BCOMP_PARTITION_NUM=?,BCOMP_DATE_MODE=?,BCOMP_MAX_PARTITION_NUM=COALESCE(?,BCOMP_MAX_PARTITION_NUM,64) WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode(),b.maxPartitionNum(),b.bcompIndex());
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_NAME=?,BCOMP_MODULE=?,BCOMP_MEMO=?,BCOMP_RANGE=?,BCOMP_TIME_NODE=?,BCOMP_STATE=?,BCOMP_PARTITION_NUM=?,BCOMP_DATE_MODE=?,BCOMP_MAX_PARTITION_NUM=COALESCE(?,BCOMP_MAX_PARTITION_NUM,64),SOURCE_TABLE_NAME=COALESCE(?,SOURCE_TABLE_NAME),CONFIGURATION_NAME=COALESCE(?,CONFIGURATION_NAME),CONFIGURATION_SCOPE=COALESCE(?,CONFIGURATION_SCOPE) WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode(),b.maxPartitionNum(),b.sourceTableName(),b.configurationName(),b.configurationScope(),b.bcompIndex());
         jdbc.update("DELETE FROM TSS_BCOMP_TABLE_SQL_NEW WHERE BCOMP_INDEX=?",b.bcompIndex());insertSql(b.bcompIndex(),command.tableSql());
         jdbc.update("DELETE FROM TSS_BCOMP_FIELD_NEW WHERE BCOMP_INDEX=?",b.bcompIndex());insertFields(b.bcompIndex(),command.fields());
     });}
 
-    private void insertBasic(BasicConfiguration b){jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM) VALUES(?,?,'2',?,?,?,?,?,?,?,?)",b.bcompIndex(),b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode(),MaxPartitionNum.effective(b.maxPartitionNum()));}
+    private void insertBasic(BasicConfiguration b){jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_TYPE,BCOMP_MODULE,BCOMP_MEMO,BCOMP_RANGE,BCOMP_TIME_NODE,BCOMP_STATE,BCOMP_PARTITION_NUM,BCOMP_DATE_MODE,BCOMP_MAX_PARTITION_NUM,SOURCE_TABLE_NAME,CONFIGURATION_NAME,CONFIGURATION_SCOPE) VALUES(?,?,'2',?,?,?,?,?,?,?,?,?,?,?)",b.bcompIndex(),b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode(),MaxPartitionNum.effective(b.maxPartitionNum()),b.sourceTableName()==null?b.name():b.sourceTableName(),b.configurationName()==null?b.name():b.configurationName(),b.configurationScope());}
     private void insertSql(long index,TableSqlConfiguration s){jdbc.update("INSERT INTO TSS_BCOMP_TABLE_SQL_NEW(BCOMP_INDEX,ORIG_DATABASE_ID,DEST_DATABASE_ID,ORIG_SQL,DEST_SQL) VALUES(?,?,?,?,?)",index,s.origDatabaseId(),s.destDatabaseId(),s.origSql(),s.destSql());}
     private void insertFields(long index,List<FieldRule> fields){for(FieldRule f:fields)jdbc.update("INSERT INTO TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_MEMO,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_ENUM_FLAG,FIELD_ENUM_INDEX,FIELD_PARTITION_FLAG,FIELD_IGNORE_VALUE,FIELD_IGNORE_FLAG) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",index,f.name(),f.type(),f.memo(),f.oldIndex(),f.newIndex(),f.indexFlag(),f.enumFlag(),f.enumIndex(),"0",f.ignoreValue(),f.ignoreFlag());}
 

@@ -152,3 +152,17 @@ describe('DailyResultsPage export', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '导出报表' })).toBeEnabled())
   })
 })
+
+it('shows the saved source, display name and scope without hiding the fixed code', async () => {
+  server.use(http.get('/api/results', () => HttpResponse.json({
+    results: { page: 0, size: 20, total: 1, items: [{
+      bcompIndex: 2, configurationName: 'a_1', sourceTableName: 'a', configurationDisplayName: '配置乙', configurationScope: 'b=2',
+      originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat',
+      originCount: 2, destinationCount: 2, onlyOriginCount: 0, onlyDestinationCount: 0, differentCount: 1
+    }] }, connections: [{ originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat', objectCount: 1 }]
+  })))
+  renderPage(<DailyResultsPage />, '/results?date=20261126')
+  expect(await screen.findByText('配置乙')).toBeVisible()
+  expect(screen.getByText('a_1')).toBeVisible()
+  expect(screen.getByText('b=2')).toBeVisible()
+})

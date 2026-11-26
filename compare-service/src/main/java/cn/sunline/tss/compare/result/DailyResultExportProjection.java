@@ -50,9 +50,9 @@ final class DailyResultExportProjection {
             String reviser=reviser(result.reviserName(),result.reviserUsername());
             domains.computeIfAbsent(domain,ignored->new Totals()).add(result);
             tableRows.add(new DailyResultExportData.TableRow(result.bcompIndex(),domain,result.configurationName(),reviser,
-                result.originCount(),result.destinationCount(),result.onlyOriginCount(),result.onlyDestinationCount(),result.differentCount()));
+                result.originCount(),result.destinationCount(),result.onlyOriginCount(),result.onlyDestinationCount(),result.differentCount(),result.sourceTableName(),result.configurationDisplayName(),result.configurationScope()));
             item.fieldCounts().forEach((field,count)->fieldRows.add(new DailyResultExportData.FieldRow(
-                result.bcompIndex(),domain,result.configurationName(),reviser,field,count)));
+                result.bcompIndex(),domain,result.configurationName(),reviser,field,count,result.sourceTableName(),result.configurationDisplayName(),result.configurationScope())));
         }
         tableRows.sort(Comparator.comparing(DailyResultExportData.TableRow::domain)
             .thenComparing(DailyResultExportData.TableRow::tableName)

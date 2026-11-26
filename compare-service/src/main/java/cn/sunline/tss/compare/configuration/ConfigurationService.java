@@ -53,8 +53,10 @@ public class ConfigurationService {
 
     private ConfigurationSaveResult updateLocked(long index,ConfigurationCommand command) {
         if(command==null||command.basic()==null||index!=command.basic().bcompIndex())throw ApiException.badRequest("CONFIGURATION_ID_MISMATCH","路径编号与请求编号不一致");
-        validate(command);find(index);
+        validate(command);var current=find(index);
         if(repository.inUse(index))throw ApiException.conflict("CONFIGURATION_IN_USE","核对配置正被等待或运行任务引用");
+        if(!java.util.Objects.equals(current.basic().name(),command.basic().name()))throw ApiException.conflict("CONFIGURATION_CODE_IMMUTABLE","固定配置标识不可修改，请编辑配置名称或创建新配置");
+        if(command.basic().sourceTableName()!=null && current.basic().sourceTableName()!=null && !java.util.Objects.equals(current.basic().sourceTableName(),command.basic().sourceTableName()))throw ApiException.conflict("CONFIGURATION_SOURCE_IMMUTABLE","真实来源表不可修改，请创建新配置");
         repository.update(command);return finish(index);
     }
     public ConfigurationSaveResult copy(long index,CopyConfigurationRequest request){
@@ -65,7 +67,7 @@ public class ConfigurationService {
         var source=find(index);
         if(request==null||request.newIndex()<=0||blank(request.newName()))throw ApiException.badRequest("INVALID_COPY_REQUEST","新编号和名称不能为空");
         var b=source.basic();
-        var command=new ConfigurationCommand(new BasicConfiguration(request.newIndex(),request.newName().trim(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),b.partitionNum(),b.dateMode(),b.maxPartitionNum()),source.tableSql(),source.fields());
+        var command=new ConfigurationCommand(new BasicConfiguration(request.newIndex(),request.newName().trim(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),b.partitionNum(),b.dateMode(),b.maxPartitionNum(),b.sourceTableName(),b.configurationName(),b.configurationScope()),source.tableSql(),source.fields());
         return createLocked(command,index);
     }
     public ConfigurationOptions options(){return repository.options(fieldMatchByName);}
@@ -96,6 +98,7 @@ public class ConfigurationService {
         MaxPartitionNum.effective(b.maxPartitionNum());
         // Legacy Axon imports omit the date mode; keep the same optional rule as task/batch validation.
         if(b.bcompIndex()<=0||blank(b.name())||blank(b.state())||(!blank(b.dateMode())&&!("1".equals(b.dateMode())||"2".equals(b.dateMode())))||blank(s.origSql())||blank(s.destSql())||!repository.databasesExist(s.origDatabaseId(),s.destDatabaseId()))throw ApiException.badRequest("INVALID_CONFIGURATION","核对基本信息、SQL或数据库引用不完整");
+        if(b.name().length()>100 || (b.sourceTableName()!=null && b.sourceTableName().length()>256) || (b.configurationName()!=null && b.configurationName().length()>200))throw ApiException.badRequest("INVALID_CONFIGURATION","配置标识、真实表名或配置名称超过允许长度");
         Set<Long> oldIndexes=new HashSet<>(),newIndexes=new HashSet<>();int keys=0;
         Set<String> names=new HashSet<>();
         for(FieldRule f:command.fields()){

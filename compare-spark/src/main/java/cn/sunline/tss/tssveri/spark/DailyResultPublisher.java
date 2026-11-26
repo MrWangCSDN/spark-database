@@ -7,17 +7,21 @@ import java.util.*;
 
 /** Publish summary, bounded samples and task completion in one metadata transaction. */
 final class DailyResultPublisher {
-    record Context(String name,String module,String reviserName,String reviserUsername,Long originId,String originName,Long destinationId,String destinationName) {
+    record Context(String code,String module,String reviserName,String reviserUsername,Long originId,String originName,Long destinationId,String destinationName,
+                   String sourceTableName,String configurationDisplayName,String configurationScope) {
+        Context(String code,String module,String reviserName,String reviserUsername,Long originId,String originName,Long destinationId,String destinationName) {
+            this(code,module,reviserName,reviserUsername,originId,originName,destinationId,destinationName,code,code,null);
+        }
         Context(String name,String module,Long originId,String originName,Long destinationId,String destinationName) {
             this(name,module,null,null,originId,originName,destinationId,destinationName);
         }
     }
     static Context context(Connection connection,long index) throws SQLException {
-        try(var ps=connection.prepareStatement("SELECT c.BCOMP_NAME,c.BCOMP_MODULE,c.REVISER_NAME,c.REVISER_USERNAME,s.ORIG_DATABASE_ID,o.DATABASE_NAME,s.DEST_DATABASE_ID,d.DATABASE_NAME FROM TSS_BCOMP_CONF_NEW c JOIN TSS_BCOMP_TABLE_SQL_NEW s ON s.BCOMP_INDEX=c.BCOMP_INDEX LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW o ON o.DATABASE_ID=s.ORIG_DATABASE_ID LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d ON d.DATABASE_ID=s.DEST_DATABASE_ID WHERE c.BCOMP_INDEX=?")) {
+        try(var ps=connection.prepareStatement("SELECT c.BCOMP_NAME,c.BCOMP_MODULE,c.REVISER_NAME,c.REVISER_USERNAME,s.ORIG_DATABASE_ID,o.DATABASE_NAME,s.DEST_DATABASE_ID,d.DATABASE_NAME,COALESCE(c.SOURCE_TABLE_NAME,c.BCOMP_NAME),COALESCE(c.CONFIGURATION_NAME,c.BCOMP_NAME),c.CONFIGURATION_SCOPE FROM TSS_BCOMP_CONF_NEW c JOIN TSS_BCOMP_TABLE_SQL_NEW s ON s.BCOMP_INDEX=c.BCOMP_INDEX LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW o ON o.DATABASE_ID=s.ORIG_DATABASE_ID LEFT JOIN TSS_BCOMP_DATABASE_CONFIG_NEW d ON d.DATABASE_ID=s.DEST_DATABASE_ID WHERE c.BCOMP_INDEX=?")) {
             ps.setLong(1,index);
             try(var rs=ps.executeQuery()) {
                 if(!rs.next()) throw new SQLException("任务结果配置不存在");
-                return new Context(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getObject(5,Long.class),rs.getString(6),rs.getObject(7,Long.class),rs.getString(8));
+                return new Context(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getObject(5,Long.class),rs.getString(6),rs.getObject(7,Long.class),rs.getString(8),rs.getString(9),rs.getString(10),rs.getString(11));
             }
         }
     }
@@ -81,8 +85,9 @@ final class DailyResultPublisher {
             for(String table:new String[]{"TSS_BCOMP_DTL_NEW","TSS_BCOMP_FIELD_DIFF_NEW","TSS_BCOMP_FIELD_COUNT_NEW","TSS_BCOMP_RESULT_NEW"}) {
                 try(var ps=c.prepareStatement("DELETE FROM "+table+" WHERE BCOMP_INDEX=? AND RESULT_DATE=?")) { ps.setLong(1,index);ps.setString(2,date);ps.execute(); }
             }
-            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,CONFIGURATION_MODULE,REVISER_NAME,REVISER_USERNAME,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,DETAILS_EXPIRED,FIELD_COUNTS_VERSION,FIELD_COUNTS_SIZE) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'0',1,?)")) {
-                int i=1;ps.setLong(i++,index);ps.setString(i++,date);ps.setString(i++,runId);ps.setString(i++,args[7]);ps.setString(i++,args[8]);ps.setString(i++,args[9]);ps.setString(i++,context.name());ps.setString(i++,context.module());
+            try(var ps=c.prepareStatement("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,CONFIGURATION_MODULE,SOURCE_TABLE_NAME,CONFIGURATION_DISPLAY_NAME,CONFIGURATION_SCOPE,REVISER_NAME,REVISER_USERNAME,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,DETAILS_EXPIRED,FIELD_COUNTS_VERSION,FIELD_COUNTS_SIZE) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'0',1,?)")) {
+                int i=1;ps.setLong(i++,index);ps.setString(i++,date);ps.setString(i++,runId);ps.setString(i++,args[7]);ps.setString(i++,args[8]);ps.setString(i++,args[9]);ps.setString(i++,context.code());ps.setString(i++,context.module());
+                ps.setString(i++,context.sourceTableName());ps.setString(i++,context.configurationDisplayName());ps.setString(i++,context.configurationScope());
                 ps.setString(i++,context.reviserName());ps.setString(i++,context.reviserUsername());
                 ps.setObject(i++,context.originId());ps.setString(i++,context.originName());ps.setObject(i++,context.destinationId());ps.setString(i++,context.destinationName());
                 ps.setLong(i++,result.originCount());ps.setLong(i++,result.destinationCount());ps.setLong(i++,result.matched);ps.setLong(i++,result.onlyOrigin);ps.setLong(i++,result.onlyDestination);ps.setLong(i++,result.different);

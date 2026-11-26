@@ -21,6 +21,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class DailyResultApiTest {
     JdbcTemplate jdbc;DailyResultRepository repository;MockMvc mvc;
+    @Test void exportsFrozenConfigurationMetadataAfterAllCurrentConfigurationHasChanged() throws Exception {
+        jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET CONFIGURATION_NAME='a_1',SOURCE_TABLE_NAME='a',CONFIGURATION_DISPLAY_NAME='配置乙',CONFIGURATION_SCOPE='b=2'");
+        jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,SOURCE_TABLE_NAME,CONFIGURATION_NAME,CONFIGURATION_SCOPE) VALUES(1,'different','changed','新名称','changed=1')");
+        mvc.perform(get("/api/results/1/20260920")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.configurationName").value("a_1"))
+            .andExpect(jsonPath("$.sourceTableName").value("a"))
+            .andExpect(jsonPath("$.configurationDisplayName").value("配置乙"))
+            .andExpect(jsonPath("$.configurationScope").value("b=2"));
+        byte[] bytes=mvc.perform(get("/api/results/export").param("date","20260920")).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try(var book=new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var tables=book.getSheet("表明细");var fields=book.getSheet("表字段明细");
+            assertThat(tables.getRow(0).getCell(8).getStringCellValue()).isEqualTo("真实表名");
+            assertThat(tables.getRow(0).getCell(9).getStringCellValue()).isEqualTo("配置名称");
+            assertThat(tables.getRow(0).getCell(10).getStringCellValue()).isEqualTo("查询条件");
+            assertThat(tables.getRow(1).getCell(1).getStringCellValue()).isEqualTo("a_1");
+            assertThat(tables.getRow(1).getCell(8).getStringCellValue()).isEqualTo("a");
+            assertThat(tables.getRow(1).getCell(9).getStringCellValue()).isEqualTo("配置乙");
+            assertThat(tables.getRow(1).getCell(10).getStringCellValue()).isEqualTo("b=2");
+            assertThat(fields.getRow(1).getCell(1).getStringCellValue()).isEqualTo("a_1");
+            assertThat(fields.getRow(1).getCell(5).getStringCellValue()).isEqualTo("a");
+            assertThat(fields.getRow(1).getCell(6).getStringCellValue()).isEqualTo("配置乙");
+            assertThat(fields.getRow(1).getCell(7).getStringCellValue()).isEqualTo("b=2");
+        }
+    }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";MODE=PostgreSQL;DB_CLOSE_DELAY=-1","sa","");
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(ds);
@@ -137,12 +161,12 @@ class DailyResultApiTest {
             assertThat(tables.getRow(0).getCell(2).getStringCellValue()).isEqualTo("负责人");
             assertThat(tables.getRow(1).getCell(2).getStringCellValue()).isEqualTo("王山河(c-wangsh8)");
             assertThat(tables.getRow(1).getCell(3).getNumericCellValue()).isEqualTo(1000005d);
-            assertThat(tables.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:H2");
+            assertThat(tables.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:K2");
             assertThat(fields.getRow(0).getCell(2).getStringCellValue()).isEqualTo("负责人");
             assertThat(fields.getRow(1).getCell(2).getStringCellValue()).isEqualTo("王山河(c-wangsh8)");
             assertThat(fields.getRow(1).getCell(3).getStringCellValue()).isEqualTo("A");
             assertThat(fields.getRow(1).getCell(4).getNumericCellValue()).isEqualTo(2d);
-            assertThat(fields.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:E2");
+            assertThat(fields.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:H2");
         }
     }
     @Test void exportsPlaceholderForHistoricalResultWithoutReviser() throws Exception {

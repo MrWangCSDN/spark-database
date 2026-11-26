@@ -20,7 +20,15 @@ public record DailyResultExportData(List<DatabaseSection> sections) {
                             long onlyDestinationCount,long differentCount) {}
 
     public record TableRow(long bcompIndex,String domain,String tableName,String reviser,long originCount,long destinationCount,
-                           long onlyOriginCount,long onlyDestinationCount,long differentCount) {}
+                           long onlyOriginCount,long onlyDestinationCount,long differentCount,String sourceTableName,String configurationName,String configurationScope) {
+        public TableRow(long bcompIndex,String domain,String tableName,String reviser,long originCount,long destinationCount,long onlyOriginCount,long onlyDestinationCount,long differentCount) {
+            this(bcompIndex,domain,tableName,reviser,originCount,destinationCount,onlyOriginCount,onlyDestinationCount,differentCount,null,null,null);
+        }
+    }
 
-    public record FieldRow(long bcompIndex,String domain,String tableName,String reviser,String fieldName,long differentCount) {}
+    public record FieldRow(long bcompIndex,String domain,String tableName,String reviser,String fieldName,long differentCount,String sourceTableName,String configurationName,String configurationScope) {
+        public FieldRow(long bcompIndex,String domain,String tableName,String reviser,String fieldName,long differentCount) {
+            this(bcompIndex,domain,tableName,reviser,fieldName,differentCount,null,null,null);
+        }
+    }
 }

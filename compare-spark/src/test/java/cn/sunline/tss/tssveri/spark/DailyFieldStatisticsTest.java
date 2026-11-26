@@ -57,6 +57,8 @@ class DailyFieldStatisticsTest {
                 // The GDB schema has the same batch boundary but its comment can differ.
                 int batch=old.indexOf("CREATE TABLE TSS_BCOMP_BATCH_NEW");
                 if(batch>=0) old=old.substring(0,batch);
+                old=old.replace("    SOURCE_TABLE_NAME VARCHAR(256),\n","").replace("    CONFIGURATION_NAME VARCHAR(200),\n","")
+                    .replace("    CONFIGURATION_SCOPE "+(dialect.equals("new")?"TEXT":"LONGTEXT")+",\n","");
                 old=old.replace("    BCOMP_SHARD_STRATEGY VARCHAR(20),\n    REVISER_NAME VARCHAR(100),\n    REVISER_USERNAME VARCHAR(100)\n","    BCOMP_SHARD_STRATEGY VARCHAR(20)\n")+"COMMIT;";
                 RunScript.execute(c,new java.io.StringReader(old.replace("START TRANSACTION;","BEGIN;")));
                 for(String migration:List.of("batch_tables","daily_results","field_patterns","pattern_overflow","result_module","reviser")) {
@@ -66,7 +68,7 @@ class DailyFieldStatisticsTest {
                 }
                 statement.execute("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,REVISER_NAME) VALUES(1,'preserved','原负责人')");
                 statement.execute("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT) VALUES(1,'20261118','old','20261118','old','A',1,1,1,0,0,0,0,0,0,0,'20261118000000')");
-                for(String migration:List.of("field_counts","result_reviser","full_details")) {
+                for(String migration:List.of("field_counts","result_reviser","full_details","configuration_identity")) {
                     String sql=Files.readString(Path.of("../sql/add_bcomp_"+migration+"_"+dialect+".sql"));
                     // H2's MySQL mode accepts BEGIN for the vendor START TRANSACTION wrapper.
                     RunScript.execute(c,new java.io.StringReader(sql.replace("START TRANSACTION;","BEGIN;")));
