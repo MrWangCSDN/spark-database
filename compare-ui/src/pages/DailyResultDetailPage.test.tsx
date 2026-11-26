@@ -5,6 +5,7 @@ import { renderPage } from '../test/render'
 import { server } from '../test/server'
 import { DailyResultDetailPage } from './DailyResultDetailPage'
 import { DailyResultsPage } from './DailyResultsPage'
+import { DailySampleGrid } from './DailySampleGrid'
 
 export const daily = { bcompIndex: 1, resultDate: '20260920', runId: 'v1', taskBusiDate: '20260921', taskBatch: 'b1', timeNode: 'D', configurationName: '客户表', configurationModule: 'dept', reviserName: null, reviserUsername: null, originDatabaseId: 1, originDatabaseName: 'sit', destinationDatabaseId: 2, destinationDatabaseName: 'uat', originCount: 1000005, destinationCount: 2000005, matchedCount: 3, onlyOriginCount: 1000000, onlyDestinationCount: 2000000, differentCount: 2, detailLimit: 1000, originSamples: 1000, destinationSamples: 1000, differentSamples: 2, publishedAt: '20260922120000', detailsExpired: '0' }
 function mock(expired = false, patterns: Array<{ patternId: string; fields: string[]; differentCount: number; sampleCount: number; collapsedPatternCount: number }> = [
@@ -142,6 +143,24 @@ test('does not fall back to legacy samples when only collapsed patterns remain',
   expect(await screen.findByText('其余 12 种组合，共 40 条差异，未保存样本')).toBeVisible()
   expect(screen.queryByText(/请重新执行核对/)).not.toBeInTheDocument()
   expect(requested).toEqual([null])
+})
+
+test('distinguishes unchanged fields from truncated values across mixed full-mode patterns', () => {
+  const summary = { ...daily, detailLimit: -1 }
+  renderPage(<DailySampleGrid type="4" originName="sit" destinationName="uat" samples={{
+    summary, page: 0, size: 100, total: 3,
+    items: [
+      { businessKey: 'only-a', detail: { fields: [{ name: 'a', originValue: '1', destinationValue: '2' }], truncated: false } },
+      { businessKey: 'only-b', detail: { fields: [{ name: 'b', originValue: '3', destinationValue: '4' }], truncated: false } },
+      { businessKey: 'clipped', detail: { fields: [], truncated: true } },
+    ],
+  }} />, '/results/1/20260920')
+  const first = screen.getByRole('row', { name: /only-a/ })
+  const second = screen.getByRole('row', { name: /only-b/ })
+  expect(within(first).getByRole('cell', { name: '无差异' })).toBeVisible()
+  expect(within(second).getByRole('cell', { name: '无差异' })).toBeVisible()
+  expect(within(screen.getByRole('row', { name: /clipped/ })).getAllByRole('cell', { name: '未展示（已截断）' })).toHaveLength(2)
+  expect(screen.queryByText('未保存')).not.toBeInTheDocument()
 })
 
 test('browses all full-mode field differences including overflow and keeps group shortcuts', async () => {
