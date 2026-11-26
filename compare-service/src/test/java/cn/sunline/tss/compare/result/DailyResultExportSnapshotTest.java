@@ -67,6 +67,59 @@ class DailyResultExportSnapshotTest {
         jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET DIFFERENT_COUNT=0,ORIGIN_COUNT=0,DESTINATION_COUNT=0,FIELD_COUNTS_SIZE=0");
         assertThat(repository.exportSnapshot("20260928").results().get(0).fieldCounts()).isEmpty();
     }
+    @Test void maintenanceUsesUnboundedJdbcStatementsWhileInteractiveReadsKeepTheirTimeout() {
+        insert(1,1,1);
+        var observed=new ArrayList<Integer>();
+        var monitored=new AbstractDataSource() {
+            @Override public Connection getConnection() throws SQLException {
+                var connection=source.getConnection();
+                return (Connection)Proxy.newProxyInstance(Connection.class.getClassLoader(),new Class<?>[]{Connection.class},(p,m,args)->{
+                    Object result=invoke(connection,m,args);
+                    if(!(result instanceof Statement statement)) return result;
+                    Class<?> api=statement instanceof PreparedStatement?PreparedStatement.class:Statement.class;
+                    return Proxy.newProxyInstance(api.getClassLoader(),new Class<?>[]{api},(unused,method,params)->{
+                        if(method.getName().startsWith("execute")) observed.add(statement.getQueryTimeout());
+                        return invoke(statement,method,params);
+                    });
+                });
+            }
+            @Override public Connection getConnection(String u,String p) throws SQLException {return getConnection();}
+        };
+        var repo=new DailyResultRepository(monitored,new ObjectMapper());
+        repo.exact(1,"20260928");
+        assertThat(observed).containsExactly(30);
+        observed.clear();
+        repo.removeFinishedStages();
+        assertThat(repo.expire("20261001000000")).isEqualTo(1);
+        assertThat(observed).hasSizeGreaterThanOrEqualTo(6).containsOnly(0);
+    }
+
+    private static Object invoke(Object target,Method method,Object[] args) throws Throwable {
+        try{return method.invoke(target,args);}catch(InvocationTargetException error){throw error.getCause();}
+    }
+
+    @Test void failedOrphanCleanupStillExpiresPublishedDetails() {
+        insert(1,1,1);
+        jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET PUBLISHED_AT='20000101000000'");
+        jdbc.execute("DROP TABLE TSS_BCOMP_FULL_STAGE_NEW");
+        jdbc.execute("DROP TABLE TSS_BCOMP_FULL_WIN_NEW");
+        jdbc.execute("DROP TABLE TSS_BCOMP_FULL_RUN_NEW");
+        new ResultRetention(repository,1).clean();
+        assertThat(repository.exact(1,"20260928").detailsExpired()).isEqualTo("1");
+    }
+
+    @Test void expiryFailureRollsBackDetailsAndDoesNotStrandOrphanedAttempts() {
+        insert(1,1,1);
+        jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET PUBLISHED_AT='20000101000000',DIFFERENT_SAMPLES=1");
+        jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,RESULT_DATE,LINE_RESULT,SAMPLE_NO) VALUES(1,'20260928','4',1)");
+        jdbc.update("INSERT INTO TSS_BCOMP_FULL_RUN_NEW VALUES('orphan',1,'20260928','missing','D','20000101000000')");
+        jdbc.execute("ALTER TABLE TSS_BCOMP_RESULT_NEW ADD CONSTRAINT reject_expiry CHECK (DETAILS_EXPIRED='0')");
+        assertThatThrownBy(()->new ResultRetention(repository,1).clean()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_FULL_RUN_NEW",Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DTL_NEW",Long.class)).isEqualTo(1);
+        assertThat(repository.exact(1,"20260928").differentSamples()).isEqualTo(1);
+    }
+
     @Test void reportsUnavailableTablesWithBoundedMessage() {
         for(int i=1;i<=11;i++) insert(i,1,0);
         assertThatThrownBy(()->repository.exportSnapshot("20260928")).isInstanceOfSatisfying(ApiException.class,error->{

@@ -66,7 +66,7 @@ class DailyFieldStatisticsTest {
                 }
                 statement.execute("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,REVISER_NAME) VALUES(1,'preserved','原负责人')");
                 statement.execute("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT) VALUES(1,'20261118','old','20261118','old','A',1,1,1,0,0,0,0,0,0,0,'20261118000000')");
-                for(String migration:List.of("field_counts","result_reviser")) {
+                for(String migration:List.of("field_counts","result_reviser","full_details")) {
                     String sql=Files.readString(Path.of("../sql/add_bcomp_"+migration+"_"+dialect+".sql"));
                     // H2's MySQL mode accepts BEGIN for the vendor START TRANSACTION wrapper.
                     RunScript.execute(c,new java.io.StringReader(sql.replace("START TRANSACTION;","BEGIN;")));

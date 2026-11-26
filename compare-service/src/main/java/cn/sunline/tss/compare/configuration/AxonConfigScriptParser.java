@@ -239,7 +239,7 @@ final class AxonConfigScriptParser {
     private void validateSampleLimit(String token) {
         try {
             int limit = Integer.parseInt(token);
-            if (limit < 0 || limit > 10000) invalid();
+            if (limit < -1 || limit > 10000) invalid();
         } catch (NumberFormatException exception) {
             invalid();
         }

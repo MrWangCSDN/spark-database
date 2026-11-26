@@ -105,16 +105,13 @@ final class PrimaryKeyHashPlanner {
     static Dialect dialect(String product, String url, String oceanBaseMode, String driver) {
         String name = Objects.toString(product, "").toLowerCase(Locale.ROOT);
         String jdbcUrl = Objects.toString(url, "").toLowerCase(Locale.ROOT);
-        String driverName = Objects.toString(driver, "").toLowerCase(Locale.ROOT);
         if (name.contains("oceanbase")) {
             if ("ORACLE".equalsIgnoreCase(oceanBaseMode)) return Dialect.ORACLE;
             if ("MYSQL".equalsIgnoreCase(oceanBaseMode)) return Dialect.MYSQL;
             throw new IllegalArgumentException("无法确定OceanBase兼容模式");
         }
         if (name.contains("oracle")) return Dialect.ORACLE;
-        if (name.contains("mysql") || name.contains("gdb") || name.contains("gbase")
-                || jdbcUrl.startsWith("jdbc:mysql:") || jdbcUrl.startsWith("jdbc:gdb:") || jdbcUrl.startsWith("jdbc:gbase:")
-                || driverName.contains("mysql") || driverName.contains("gdb") || driverName.contains("gbase")) return Dialect.MYSQL;
+        if (isMysqlFamily(name,jdbcUrl,driver)) return Dialect.MYSQL;
         if (name.contains("postgresql") || name.contains("opengauss")) return Dialect.POSTGRES;
         if (name.contains("gaussdb")) {
             if (jdbcUrl.startsWith("jdbc:mysql:")) return Dialect.MYSQL;
@@ -122,6 +119,15 @@ final class PrimaryKeyHashPlanner {
         }
         if ("h2".equals(name)) return Dialect.H2;
         throw new IllegalArgumentException("HASH不支持数据库产品: " + product);
+    }
+
+    static boolean isMysqlFamily(String product,String url,String driver) {
+        String name=Objects.toString(product,"").toLowerCase(Locale.ROOT);
+        String jdbcUrl=Objects.toString(url,"").toLowerCase(Locale.ROOT);
+        String driverName=Objects.toString(driver,"").toLowerCase(Locale.ROOT);
+        return name.contains("mysql") || name.contains("gdb") || name.contains("gbase")
+                || jdbcUrl.startsWith("jdbc:mysql:") || jdbcUrl.startsWith("jdbc:gdb:") || jdbcUrl.startsWith("jdbc:gbase:")
+                || driverName.contains("mysql") || driverName.contains("gdb") || driverName.contains("gbase");
     }
 
     enum Dialect {

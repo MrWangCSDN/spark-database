@@ -96,7 +96,17 @@ public class ConfigurationRepository {
         catch(DataAccessException exception){throw cn.sunline.tss.compare.api.ApiException.unprocessable("CONFIG_SCRIPT_EXECUTION_FAILED","配置脚本执行失败，请检查脚本与数据库约束",exception);}
     }
 
-    void insert(ConfigurationCommand command){transaction.executeWithoutResult(status->{insertBasic(command.basic());insertSql(command.basic().bcompIndex(),command.tableSql());insertFields(command.basic().bcompIndex(),command.fields());});}
+    void insert(ConfigurationCommand command,Long copySource) {
+        transaction.executeWithoutResult(status->{
+            insertBasic(command.basic());
+            if(copySource!=null) {
+                Integer limit=jdbc.queryForObject("SELECT BCOMP_SAMPLE_LIMIT FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=?",Integer.class,copySource);
+                jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_SAMPLE_LIMIT=? WHERE BCOMP_INDEX=?",limit,command.basic().bcompIndex());
+            }
+            insertSql(command.basic().bcompIndex(),command.tableSql());
+            insertFields(command.basic().bcompIndex(),command.fields());
+        });
+    }
     void update(ConfigurationCommand command){transaction.executeWithoutResult(status->{
         BasicConfiguration b=command.basic();
         jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_NAME=?,BCOMP_MODULE=?,BCOMP_MEMO=?,BCOMP_RANGE=?,BCOMP_TIME_NODE=?,BCOMP_STATE=?,BCOMP_PARTITION_NUM=?,BCOMP_DATE_MODE=?,BCOMP_MAX_PARTITION_NUM=COALESCE(?,BCOMP_MAX_PARTITION_NUM,64) WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",b.name(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),1,b.dateMode(),b.maxPartitionNum(),b.bcompIndex());

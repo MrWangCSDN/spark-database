@@ -25,6 +25,7 @@ class SparkCompatibilityTest {
     @Test void hashOneUsesSingleRead() throws Exception {
         compareTables("HASH", 1);
     }
+    @Test void explicitFullSavesEveryCategory() throws Exception { compareTables("HASH", 2, -1, 1); }
     @Test void explicitZeroOverridesGlobalThousandAndKeepsFullCounts() throws Exception {
         compareTables("HASH", 1, 0, 1000);
     }
@@ -48,6 +49,11 @@ class SparkCompatibilityTest {
             s.execute("create table NEW_DATA(ID int,VAL varchar(100))");
             s.execute("insert into OLD_DATA values(1,'same'),(2,'old'),(3,'missing-new'),(5,'a'),(6,'b'),(7,'only-origin')");
             s.execute("insert into NEW_DATA values(1,'same'),(2,'new'),(4,'missing-old'),(5,'a'),(6,'c'),(8,'only-dest')");
+            int extraChanged=Integer.valueOf(-1).equals(tableLimit)?20001:0;
+            if(extraChanged>0) {
+                s.execute("INSERT INTO OLD_DATA SELECT X+10,'left' FROM SYSTEM_RANGE(1,"+extraChanged+")");
+                s.execute("INSERT INTO NEW_DATA SELECT X+10,'right' FROM SYSTEM_RANGE(1,"+extraChanged+")");
+            }
             if ("HASH".equals(strategy)) {
                 s.execute("update TSS_BCOMP_FIELD_NEW set FIELD_PARTITION_FLAG='0'");
                 s.execute("alter table OLD_DATA add TENANT varchar(30) default 'tenant|中文'");
@@ -80,7 +86,7 @@ class SparkCompatibilityTest {
             }
             try(var r=s.executeQuery("select * from TSS_BCOMP_TASK_NEW")) {
                 assertTrue(r.next()); assertEquals("3",r.getString("TASK_STATE")); assertEquals("1",r.getString("TASK_RESULT"));
-                assertEquals(6,r.getLong("FILE1_ACOUNT")); assertEquals(6,r.getLong("FILE2_ACOUNT"));
+                assertEquals(6+extraChanged,r.getLong("FILE1_ACOUNT")); assertEquals(6+extraChanged,r.getLong("FILE2_ACOUNT"));
                 assertTrue(r.getString("BCOMP_READ_MODE").contains("HASH"));
                 if ("HASH".equals(strategy)) {
                     assertTrue(r.getString("BCOMP_READ_MODE").contains("HASH"));
@@ -97,17 +103,17 @@ class SparkCompatibilityTest {
                 assertEquals("20260919",r.getString("RESULT_DATE"));
             }}
             int resolved=tableLimit==null?globalLimit:tableLimit;
-            int samples=Math.min(2,resolved);
-            assertEquals(samples==0?Map.of():Map.of("4",samples,"2",samples,"3",samples),codes);
+            int samples=resolved==-1?2:Math.min(2,resolved);
+            assertEquals(samples==0?Map.of():Map.of("4",samples+extraChanged,"2",samples,"3",samples),codes);
             try(var r=s.executeQuery("select * from TSS_BCOMP_RESULT_NEW")) {
-                assertTrue(r.next());assertEquals(resolved,r.getInt("DETAIL_LIMIT"));assertEquals(6,r.getLong("ORIGIN_COUNT"));assertEquals(6,r.getLong("DESTINATION_COUNT"));
-                assertEquals(2,r.getLong("ONLY_ORIGIN_COUNT"));assertEquals(2,r.getLong("ONLY_DESTINATION_COUNT"));assertEquals(2,r.getLong("DIFFERENT_COUNT"));
+                assertTrue(r.next());assertEquals(resolved,r.getInt("DETAIL_LIMIT"));assertEquals(6+extraChanged,r.getLong("ORIGIN_COUNT"));assertEquals(6+extraChanged,r.getLong("DESTINATION_COUNT"));
+                assertEquals(2,r.getLong("ONLY_ORIGIN_COUNT"));assertEquals(2,r.getLong("ONLY_DESTINATION_COUNT"));assertEquals(2+extraChanged,r.getLong("DIFFERENT_COUNT"));
             }
             try(var r=s.executeQuery("select FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT from TSS_BCOMP_FIELD_DIFF_NEW")) {
                 assertTrue(r.next());
                 assertEquals("[\"VAL\"]",r.getString("FIELDS_JSON"));
-                assertEquals(2,r.getLong("DIFFERENT_COUNT"));
-                assertEquals(samples,r.getInt("SAMPLE_COUNT"));
+                assertEquals(2+extraChanged,r.getLong("DIFFERENT_COUNT"));
+                assertEquals(samples+extraChanged,r.getInt("SAMPLE_COUNT"));
                 assertFalse(r.next());
             }
         }

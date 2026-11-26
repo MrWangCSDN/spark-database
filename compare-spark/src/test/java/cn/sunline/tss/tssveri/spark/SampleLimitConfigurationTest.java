@@ -29,7 +29,10 @@ class SampleLimitConfigurationTest {
             assertEquals(0,SparkHandlerTable.readSampleLimit(c,2,"1000"));
             assertEquals(37,SparkHandlerTable.readSampleLimit(c,3,"invalid-unused-fallback"));
             assertEquals(10000,SparkHandlerTable.readSampleLimit(c,4,"1000"));
-            for(String invalid:List.of("-1","10001","1.5","999999999999999999")) {
+            s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_SAMPLE_LIMIT=-1 where BCOMP_INDEX=3");
+            assertEquals(-1,SparkHandlerTable.readSampleLimit(c,3,"1000"));
+            assertThrows(IllegalArgumentException.class,()->SparkHandlerTable.readSampleLimit(c,1,"-1"));
+            for(String invalid:List.of("-2","10001","1.5","999999999999999999")) {
                 s.execute("update TSS_BCOMP_CONF_NEW set BCOMP_SAMPLE_LIMIT="+invalid+" where BCOMP_INDEX=3");
                 assertThrows(IllegalArgumentException.class,()->SparkHandlerTable.readSampleLimit(c,3,"1000"));
                 assertThrows(IllegalArgumentException.class,()->SparkHandlerTable.readSampleLimit(c,1,invalid));

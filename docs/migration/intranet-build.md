@@ -166,7 +166,9 @@ WHERE table_schema = current_schema()
 ORDER BY table_name, ordinal_position;
 ```
 
-每日结果表、字段组合表及领域快照应已存在，字段组合表需有 `COLLAPSED_PATTERN_COUNT`。缺失时先按字段统计脚本注释补对应数据库的前置迁移。各增量按实际结构执行一次，部分执行过的脚本应检查后只执行缺失语句。GDB/MySQL 的 DDL 会隐式提交。全新空库直接使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql` 建齐十四张表。
+每日结果表、字段组合表及领域快照应已存在，字段组合表需有 `COLLAPSED_PATTERN_COUNT`。缺失时先按字段统计脚本注释补对应数据库的前置迁移。各增量按实际结构执行一次，部分执行过的脚本应检查后只执行缺失语句。GDB/MySQL 的 DDL 会隐式提交。全新空库直接使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql` 建齐十七张表。
+
+升级全量差异模式时，停服并等待在途 Spark 任务结束，根据元库选择 `sql/add_bcomp_full_details_new.sql`（GaussDB）或 `sql/add_bcomp_full_details_gdb.sql`（GDB/MySQL）。确认运行标识、暂存、获胜分区三张表均已创建，差异明细序号及已存数量列已扩为 BIGINT，再同时部署服务、Spark JAR 和内嵌前端。全量比对和清理需要暂存及结果表的读写权限和事务日志空间。
 
 结构升级完成后，同步替换 service、Spark JAR 和内嵌前端，再启动服务。页面右上角显示“导出报表”，按已查询日期导出全部成功结果，包含领域汇总、表明细和表字段明细。样本过期后新版全量字段统计仍可导出。历史结果缺少精确统计时会提示 `FIELD_COUNTS_UNAVAILABLE`，需用新版 Spark 重跑对应业务日期。该日期无成功结果时会提示没有可导出的结果。
 

@@ -39,13 +39,13 @@ public class ConfigurationService {
     public ConfigurationDetail find(long index){var value=repository.find(index);if(value==null)throw ApiException.notFound("CONFIGURATION_NOT_FOUND","核对配置不存在");return value;}
 
     public ConfigurationSaveResult create(ConfigurationCommand command){
-        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> createLocked(command));
+        return cn.sunline.tss.compare.ControlPlaneLock.call(() -> createLocked(command,null));
     }
 
-    private ConfigurationSaveResult createLocked(ConfigurationCommand command) {
+    private ConfigurationSaveResult createLocked(ConfigurationCommand command,Long copySource) {
         validate(command);
         if(repository.find(command.basic().bcompIndex())!=null)throw ApiException.conflict("CONFIGURATION_ID_CONFLICT","核对配置编号已存在");
-        repository.insert(command);return finish(command.basic().bcompIndex());
+        repository.insert(command,copySource);return finish(command.basic().bcompIndex());
     }
     public ConfigurationSaveResult update(long index,ConfigurationCommand command){
         return cn.sunline.tss.compare.ControlPlaneLock.call(() -> updateLocked(index, command));
@@ -66,7 +66,7 @@ public class ConfigurationService {
         if(request==null||request.newIndex()<=0||blank(request.newName()))throw ApiException.badRequest("INVALID_COPY_REQUEST","新编号和名称不能为空");
         var b=source.basic();
         var command=new ConfigurationCommand(new BasicConfiguration(request.newIndex(),request.newName().trim(),b.module(),b.memo(),b.range(),b.timeNode(),b.state(),b.partitionNum(),b.dateMode(),b.maxPartitionNum()),source.tableSql(),source.fields());
-        return create(command);
+        return createLocked(command,index);
     }
     public ConfigurationOptions options(){return repository.options(fieldMatchByName);}
 

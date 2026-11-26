@@ -105,13 +105,15 @@ class NullableUniqueKeyTest {
         }
     }
 
-    @Test void publishesNullableUniqueIndexMultiplicityThroughJdbcAndProductionMain() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints={3,-1})
+    void publishesNullableUniqueIndexMultiplicityThroughJdbcAndProductionMain(int limit) throws Exception {
         String url="jdbc:h2:mem:nullable_"+java.util.UUID.randomUUID()+";DB_CLOSE_DELAY=-1";
         try(var connection=java.sql.DriverManager.getConnection(url,"sa","");var statement=connection.createStatement()) {
             try(var schema=java.nio.file.Files.newBufferedReader(java.nio.file.Path.of("../sql/create_bcomp_new.sql"))) {
                 org.h2.tools.RunScript.execute(connection,schema);
             }
-            statement.execute("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_SAMPLE_LIMIT) VALUES(1,'nullable unique',3)");
+            statement.execute("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,BCOMP_SAMPLE_LIMIT) VALUES(1,'nullable unique',"+limit+")");
             statement.execute("INSERT INTO TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME) VALUES(1,'origin'),(2,'destination')");
             statement.execute("INSERT INTO TSS_BCOMP_TABLE_SQL_NEW(BCOMP_INDEX,ORIG_DATABASE_ID,DEST_DATABASE_ID) VALUES(1,1,2)");
             statement.execute("INSERT INTO TSS_BCOMP_FIELD_NEW(BCOMP_INDEX,FIELD_NAME,FIELD_TYPE,FIELD_OLD_INDEX,FIELD_NEW_INDEX,FIELD_INDEX_FLAG,FIELD_IGNORE_FLAG) VALUES(1,'ID','1',1,1,'1','0'),(1,'VAL','1',2,2,'0','0')");
@@ -144,7 +146,7 @@ class NullableUniqueKeyTest {
                 assertEquals(3,result.getLong("ONLY_ORIGIN_COUNT"));
                 assertEquals(1,result.getLong("ONLY_DESTINATION_COUNT"));
                 assertEquals(1,result.getLong("DIFFERENT_COUNT"));
-                assertEquals(3,result.getInt("DETAIL_LIMIT"));
+                assertEquals(limit,result.getInt("DETAIL_LIMIT"));
                 assertEquals(3,result.getInt("ORIGIN_SAMPLES"));
                 assertEquals(1,result.getInt("DESTINATION_SAMPLES"));
                 assertFalse(result.next());
