@@ -759,6 +759,26 @@ class ConfigurationApiTest {
         assertThat(jdbc.queryForObject("select ORIG_SQL from TSS_BCOMP_TABLE_SQL_NEW where BCOMP_INDEX=1",String.class)).contains("a;b");
     }
 
+    @Test void importDeletesExpiredResultsAndReturnsCleanupWhileKeepingTaskHistory() throws Exception {
+        String oldTime=java.time.LocalDateTime.now().minusDays(8).format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        jdbc.update("INSERT INTO TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE,END_DATETIME) VALUES(22,'20240101','old','3','3',?)",oldTime);
+        jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT) VALUES(22,'20240101','old-run','20240101','old','3',1,1,0,0,0,1,100,0,0,1,?)",oldTime);
+        jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,TASK_DATE,TASK_BATCH,RESULT_DATE,LINE_RESULT,SAMPLE_NO,DETAIL_JSON) VALUES(22,'20240101','old','20240101','4',1,'{}')");
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT) VALUES(22,'20240101','old-run','pattern','[\"F\"]',1,1)");
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_COUNT_NEW VALUES(22,'20240101','old-run','F',1)");
+
+        mvc(()->{}).perform(multipart("/api/configurations/import").file(scriptFile(axonScript("NEW"))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.cleanup.retentionDays").value(7))
+            .andExpect(jsonPath("$.cleanup.deletedResults").value(1))
+            .andExpect(jsonPath("$.cleanup.deletedDetails").value(1))
+            .andExpect(jsonPath("$.cleanup.deletedFieldPatterns").value(1))
+            .andExpect(jsonPath("$.cleanup.deletedFieldCounts").value(1));
+        for(String table:java.util.List.of("TSS_BCOMP_RESULT_NEW","TSS_BCOMP_DTL_NEW","TSS_BCOMP_FIELD_DIFF_NEW","TSS_BCOMP_FIELD_COUNT_NEW"))
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW",Long.class)).isEqualTo(1);
+    }
+
     @Test void rejectsForbiddenSqlAndRollsBackWholeImport() throws Exception {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
             .andExpect(status().isCreated());

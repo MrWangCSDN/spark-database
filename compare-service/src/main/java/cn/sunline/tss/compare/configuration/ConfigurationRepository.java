@@ -16,19 +16,28 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.io.Reader;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Objects;
 
 @Repository
 public class ConfigurationRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final MetadataSqlDialect dialect;
+    private final Clock clock;
     public ConfigurationRepository(DataSource source,@Value("${compare.jdbc-query-timeout-seconds:30}")int timeout){
         this(source, timeout, MetadataSqlDialect.forType(cn.sunline.tss.compare.metadata.MetadataDbType.GAUSSDB));
     }
     @Autowired
     public ConfigurationRepository(DataSource source,@Value("${compare.jdbc-query-timeout-seconds:30}")int timeout, MetadataSqlDialect dialect){
+        this(source,timeout,dialect,Clock.systemDefaultZone());
+    }
+    ConfigurationRepository(DataSource source,int timeout,MetadataSqlDialect dialect,Clock clock){
         jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(timeout);transaction=new TransactionTemplate(new DataSourceTransactionManager(source));
         this.dialect=dialect;
+        this.clock=Objects.requireNonNull(clock,"clock");
     }
 
     ConfigurationDetail find(long index){
@@ -61,7 +70,9 @@ public class ConfigurationRepository {
     boolean inUse(long index){Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW WHERE BCOMP_INDEX=? AND TASK_STATE IN ('1','2')",Integer.class,index);return count!=null&&count>0;}
     boolean databasesExist(long oldId,long newId){Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_DATABASE_CONFIG_NEW WHERE DATABASE_ID IN (?,?)",Integer.class,oldId,newId);return count!=null&&count==(oldId==newId?1:2);}
 
-    AxonConfigScriptParser.ParseResult importScript(Reader reader,AxonConfigScriptParser parser){
+    record ImportOutcome(AxonConfigScriptParser.ParseResult counts,ResultCleanupSummary cleanup) {}
+
+    ImportOutcome importScript(Reader reader,AxonConfigScriptParser parser){
         try {
             return transaction.execute(status->{
                 Integer active=jdbc.queryForObject("SELECT COUNT(*) FROM TSS_BCOMP_TASK_NEW WHERE TASK_STATE IN ('1','2')",Integer.class);
@@ -90,10 +101,12 @@ public class ConfigurationRepository {
                     .filter(entry->!parsed.explicitMaxPartitionIndexes().contains(entry.getKey()))
                     .map(entry->new Object[]{entry.getValue(),entry.getKey()}).toList();
                 if(!legacyLimits.isEmpty()) jdbc.batchUpdate("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=? WHERE BCOMP_INDEX=? AND BCOMP_TYPE='2'",legacyLimits);
-                return parsed;
+                String cutoff=LocalDateTime.now(clock).minusDays(ResultHistoryCleanup.RETENTION_DAYS)
+                    .format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+                return new ImportOutcome(parsed,ResultHistoryCleanup.clean(jdbc,cutoff));
             });
         } catch(cn.sunline.tss.compare.api.ApiException exception){throw exception;}
-        catch(DataAccessException exception){throw cn.sunline.tss.compare.api.ApiException.unprocessable("CONFIG_SCRIPT_EXECUTION_FAILED","配置脚本执行失败，请检查脚本与数据库约束",exception);}
+        catch(DataAccessException exception){throw cn.sunline.tss.compare.api.ApiException.unprocessable("CONFIG_SCRIPT_EXECUTION_FAILED","配置导入或历史结果清理失败，均未提交，请检查数据库表结构、约束或执行日志",exception);}
     }
 
     void insert(ConfigurationCommand command){transaction.executeWithoutResult(status->{insertBasic(command.basic());insertSql(command.basic().bcompIndex(),command.tableSql());insertFields(command.basic().bcompIndex(),command.fields());});}

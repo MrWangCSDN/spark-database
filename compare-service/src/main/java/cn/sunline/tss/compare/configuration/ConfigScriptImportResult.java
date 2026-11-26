@@ -6,5 +6,6 @@ public record ConfigScriptImportResult(
     long configurationCount,
     long fieldCount,
     long tableSqlCount,
-    String warning
+    String warning,
+    ResultCleanupSummary cleanup
 ) {}

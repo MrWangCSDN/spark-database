@@ -208,7 +208,11 @@ public class DailyResultRepository {
         int expired=0;
         for(var candidate:candidates) {
             Boolean changed=transaction.execute(status->{
-                var summary=find(candidate.getKey(),candidate.getValue(),true);
+                var locked=jdbc.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? FOR UPDATE",
+                    MAPPER,candidate.getKey(),candidate.getValue());
+                // Import cleanup may have removed a candidate after the outer selection.
+                if(locked.isEmpty()) return false;
+                var summary=locked.get(0);
                 if("1".equals(summary.detailsExpired()) || summary.publishedAt().compareTo(cutoff)>=0) return false;
                 jdbc.update("DELETE FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
                 jdbc.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET SAMPLE_COUNT=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());

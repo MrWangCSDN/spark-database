@@ -127,6 +127,33 @@ class DailyResultExportSnapshotTest {
             assertThat(current.summary().runId()).isEqualTo("new-run");assertThat(current.fieldCounts()).containsEntry("A",5L);
         } finally {release.countDown();pool.shutdownNow();pool.awaitTermination(5,TimeUnit.SECONDS);}
     }
+
+    @Test void sampleExpirySkipsACandidateRemovedBeforeItsLockedLookup() throws Exception {
+        insert(1,1,1);
+        var selected=new CountDownLatch(1);var release=new CountDownLatch(1);var once=new AtomicBoolean();
+        var gated=new AbstractDataSource() {
+            @Override public Connection getConnection() throws SQLException {
+                Connection delegate=source.getConnection();
+                return (Connection)Proxy.newProxyInstance(Connection.class.getClassLoader(),new Class<?>[]{Connection.class},(p,m,args)->{
+                    if(m.getName().equals("prepareStatement")&&args[0].toString().contains("WHERE BCOMP_INDEX=? AND RESULT_DATE=? FOR UPDATE")&&once.compareAndSet(false,true)) {
+                        selected.countDown();
+                        if(!release.await(10,TimeUnit.SECONDS)) throw new SQLException("expiry test barrier timed out");
+                    }
+                    try{return m.invoke(delegate,args);}catch(InvocationTargetException error){throw error.getCause();}
+                });
+            }
+            @Override public Connection getConnection(String u,String p) throws SQLException {return getConnection();}
+        };
+        var pool=Executors.newSingleThreadExecutor();
+        try {
+            var expiry=pool.submit(()->new DailyResultRepository(gated,new ObjectMapper()).expire("20261001000000"));
+            assertThat(selected.await(5,TimeUnit.SECONDS)).isTrue();
+            jdbc.update("DELETE FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=1");
+            release.countDown();
+            assertThatCode(()->expiry.get(5,TimeUnit.SECONDS)).doesNotThrowAnyException();
+            assertThat(expiry.get(5,TimeUnit.SECONDS)).isZero();
+        } finally {release.countDown();pool.shutdownNow();pool.awaitTermination(5,TimeUnit.SECONDS);}
+    }
     private void insert(long index,long different,int version) {insert(jdbc,index,different,version,"run-"+index);}
     private static void insert(JdbcTemplate jdbc,long index,long different,int version,String run) {
         jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,CONFIGURATION_MODULE,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,FIELD_COUNTS_VERSION) VALUES(?,'20260928',?,'20260928','batch','D',?,'dept',1,'来源',2,'目标',?,?,0,0,0,?,0,0,0,0,'20260928120000',?)",

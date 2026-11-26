@@ -77,13 +77,14 @@ public class ConfigurationService {
     private ConfigScriptImportResult importScriptLocked(MultipartFile file) {
         if(file==null||file.isEmpty())throw ApiException.badRequest("CONFIG_SCRIPT_REQUIRED","请选择或粘贴 Axon 配置脚本");
         if(file.getSize()>maxImportBytes)throw ApiException.payloadTooLarge("CONFIG_SCRIPT_TOO_LARGE","配置脚本超过允许的大小");
-        AxonConfigScriptParser.ParseResult counts;
+        ConfigurationRepository.ImportOutcome outcome;
         try(var reader=new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8)){
-            counts=repository.importScript(reader,scriptParser);
+            outcome=repository.importScript(reader,scriptParser);
         }catch(IOException exception){throw ApiException.badRequest("CONFIG_SCRIPT_READ_FAILED","配置脚本读取失败");}
         boolean refreshed=true;
         try{cache.reload();}catch(RuntimeException exception){refreshed=false;}
-        return new ConfigScriptImportResult(true,refreshed,counts.configurationCount(),counts.fieldCount(),counts.tableSqlCount(),refreshed?null:"配置已导入，但缓存刷新失败");
+        var counts=outcome.counts();
+        return new ConfigScriptImportResult(true,refreshed,counts.configurationCount(),counts.fieldCount(),counts.tableSqlCount(),refreshed?null:"配置已导入，但缓存刷新失败",outcome.cleanup());
     }
 
     private ConfigurationSaveResult finish(long index){

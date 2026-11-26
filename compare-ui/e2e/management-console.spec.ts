@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import type { BasicConfiguration, BatchRequest, ConfigurationDetail } from '../src/api/types'
+import type { BasicConfiguration, BatchRequest, ConfigScriptImportResult, ConfigurationDetail } from '../src/api/types'
 
 const task = {
   bcompIndex: 8, configurationName: '客户余额核对', taskBusinessDate: '20260920', verifyBusinessDate: '20260920',
@@ -7,6 +7,66 @@ const task = {
   taskState: '1', taskResult: null, failureReason: null, file1Count: null, file2Count: null,
   file1SuccessCount: null, file2SuccessCount: null, file1FailureCount: null, file2FailureCount: null, readMode: '1'
 }
+
+const importResult: ConfigScriptImportResult = {
+  saved: true, cacheRefreshed: false, configurationCount: 2, fieldCount: 18, tableSqlCount: 2, warning: '配置已导入，但缓存刷新失败',
+  cleanup: { retentionDays: 7, cutoff: '20261119100000', deletedResults: 4, deletedDetails: 120, deletedFieldPatterns: 8, deletedFieldCounts: 12, deletedLegacyDetails: 20 }
+}
+
+test('requires seven-day import confirmation while preserving task and batch history', async ({ page }) => {
+  let imports = 0, contentType = ''
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    if (new URL(route.request().url()).pathname === '/api/configurations/import') {
+      imports++
+      contentType = route.request().headers()['content-type'] ?? ''
+      return route.fulfill({ json: { ...importResult, cacheRefreshed: true, warning: null } })
+    }
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+  })
+  await page.goto('/configurations/new')
+  await page.getByLabel('主题').selectOption('light')
+  await expect(page.getByRole('note')).toContainText('按发布时间清理超过 7 天的历史结果与样本')
+  await expect(page.getByRole('note')).toContainText('任务和批次历史保留')
+  const confirmation = page.getByRole('checkbox', { name: /确认执行后会整体替换/ })
+  await expect(confirmation).toHaveAccessibleName(/按发布时间清理超过 7 天的历史结果与样本，保留任务和批次历史/)
+  await page.getByLabel('选择 SQL 文件').setInputFiles({ name: 'axon-config.sql', mimeType: 'application/sql', buffer: Buffer.from('START TRANSACTION; COMMIT;') })
+  await page.getByRole('button', { name: '执行导入', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('请确认脚本会整体替换三张配置表，并清理 7 天前的历史结果')
+  expect(imports).toBe(0)
+  await confirmation.check()
+  await page.getByRole('button', { name: '执行导入', exact: true }).click()
+  await expect(page.getByText('已导入 2 个配置')).toBeVisible()
+  expect(imports).toBe(1)
+  expect(contentType).toContain('multipart/form-data;')
+})
+
+test('keeps committed cleanup counts visible when cache refresh fails and is retried', async ({ page }) => {
+  let imports = 0, refreshes = 0
+  await page.route(/^http:\/\/127\.0\.0\.1:4173\/api\//, async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/configurations/import') { imports++; return route.fulfill({ json: importResult }) }
+    if (path === '/api/cache/refresh') { refreshes++; return route.fulfill({ json: { code: 200, msg: '刷新成功' } }) }
+    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND', message: 'not found', traceId: 'e2e' } })
+  })
+  await page.goto('/configurations/new')
+  await page.getByLabel('主题').selectOption('dark')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await page.getByRole('textbox', { name: '粘贴 SQL' }).fill('START TRANSACTION; COMMIT;')
+  await page.getByRole('checkbox', { name: /确认执行后会整体替换/ }).check()
+  await page.getByRole('button', { name: '执行导入', exact: true }).click()
+  const cleanup = page.getByRole('region', { name: '历史结果清理' })
+  await expect(cleanup.getByRole('heading', { name: '历史结果清理完成' })).toBeVisible()
+  await expect(cleanup).toContainText('2026-11-19 10:00:00')
+  await expect(cleanup).toContainText('已清理 4 条每日结果、120 条差异明细（其中旧版明细 20 条）')
+  await expect(cleanup).toContainText('字段组合统计 8 条，字段差异计数 12 条')
+  await expect(page.getByText('配置已导入，但缓存刷新失败', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '发起全部比对' })).toHaveCount(0)
+  await page.getByRole('button', { name: '重试刷新缓存' }).click()
+  await expect(page.getByRole('link', { name: '发起全部比对' })).toBeVisible()
+  await expect(cleanup).toContainText('120 条差异明细')
+  expect(imports).toBe(1)
+  expect(refreshes).toBe(1)
+})
 
 for (const theme of ['light', 'dark']) {
   test(`edits the HASH partition limit with browser validation in ${theme} theme`, async ({ page }) => {
