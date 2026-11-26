@@ -71,7 +71,9 @@
 
 - [x] Run complete service tests/package with Java17 and available JDBC6.0.0; run relevant Spark NULL-key regressions; no competing Maven builds.
 - [x] Fresh whole-branch review of SQL/transaction/legacy boundaries and UI compatibility; address material findings with RED/GREEN.
-- [ ] Update approved design/overview/index/log with actual implementation and checks in the isolated vault, commit and push non-force.
-- [ ] Commit application changes and package credential-free source ZIP with current frontend plus service update if build available; verify archive contents, checksums, clean git diff.
+- [x] Update approved design/overview/index/log with actual implementation and checks in the isolated vault, commit and push non-force.
+- [x] Commit application changes and package credential-free source ZIP with current frontend plus service update if build available; verify archive contents, checksums, clean git diff.
 
 Verification so far: service247 (1 external GaussDB skip), UI107/build, Chromium12, Spark3.4 nullable-key/aggregate/hash24 all green. Full fresh read-only branch review: no actionable findings. Production deployment not performed; source delivery uses the existing intranet BES build.
+
+Delivery verified: credential-free source ZIP includes current frontend and upgrade guide; SHA-256/ZIP integrity/source identity checked. Implementation commit0eaa6df; isolated vault implementation/verification commit65cdc57 pushed to origin/main. No production deployment or data deletion performed.
