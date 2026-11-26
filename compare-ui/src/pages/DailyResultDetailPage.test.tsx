@@ -260,3 +260,21 @@ test('describes expired full details without claiming the rows are still saved',
   expect(screen.queryByText(/已保存全部差异明细/)).not.toBeInTheDocument()
   expect(screen.queryByText(/样本已按保留期限清理/)).not.toBeInTheDocument()
 })
+
+test('keeps overflow counts after full details expire without directing users to deleted rows', async () => {
+  const expired = { ...daily, detailLimit: -1, detailsExpired: '1', originSamples: 0, destinationSamples: 0,
+    differentSamples: 0, differentCount: 140, originCount: 1000143, destinationCount: 2000143 }
+  server.use(
+    http.get('/api/results/1/20260920', () => HttpResponse.json(expired)),
+    http.get('/api/results/1/20260920/field-patterns', () => HttpResponse.json([
+      { patternId: '__OTHER__', fields: [], differentCount: 140, sampleCount: 0, collapsedPatternCount: 140 },
+    ])),
+    http.get('/api/results/1/20260920/differences', () => HttpResponse.json({ summary: expired, items: [], page: 0, size: 100, total: 0 }))
+  )
+  renderPage(<DailyResultDetailPage />, '/results/1/20260920')
+  await userEvent.setup().click(await screen.findByRole('tab', { name: /主键相同、字段不同/ }))
+  const overflow = await screen.findByRole('note')
+  expect(overflow).toHaveTextContent('其余 140 种组合，共 140 条差异')
+  expect(overflow).toHaveTextContent('明细已按保留期限清理')
+  expect(overflow).not.toHaveTextContent('请在')
+})

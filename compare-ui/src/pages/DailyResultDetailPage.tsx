@@ -35,6 +35,9 @@ export function DailyResultDetailPage() {
     : total > saved ? '其余明细未保存，汇总已包含全部差异。' : '计数来自全量核对。'
   const emptyDescription = total === 0 ? '该类别没有差异。' : fullDetails
     ? '请核查明细是否已按保留期限清理。' : '请以全量差异数量为准；样本可能未启用或已清理。'
+  const collapsedDetailDescription = fullDetails
+    ? item.detailsExpired === '1' ? '；明细已按保留期限清理。' : '；请在“全部字段差异”中查看明细。'
+    : '，未保存样本'
   return <div className="page daily-result-page"><Link className="back-link" to={`/results?date=${item.resultDate}`}>← 返回每日结果</Link>
     <div className="page-heading compact"><div><span className="eyebrow">DAILY RESULT</span><h1>{item.configurationName}</h1><p>核对日期 {item.resultDate} · 最近成功批次 {item.taskBatch} · 完成于 {formatTime(item.publishedAt)}</p></div></div>
     {replaced && <div className="notice" role="status">原任务的明细已被同一核对日期后续成功执行替换，当前展示当天最新成功结果。</div>}
@@ -48,7 +51,7 @@ export function DailyResultDetailPage() {
       {type === '4' && (fullDetails || !!patterns.data?.length) && <div className="daily-pattern-picker" role="group" aria-label="差异字段组合">
         {fullDetails && <button type="button" className="pattern-switch" aria-pressed={!patternId} onClick={() => { setPatternId(null); setPage(0) }}><strong>全部字段差异</strong><span>{item.differentCount.toLocaleString()} 行</span><small>已存明细 <span>{item.differentSamples.toLocaleString()} 条</span></small></button>}
         {selectablePatterns.map(pattern => <button key={pattern.patternId} type="button" className="pattern-switch" aria-pressed={selectedPattern?.patternId === pattern.patternId} onClick={() => { setPatternId(pattern.patternId); setPage(0) }}><strong>[{pattern.fields.join('、')}]</strong><span>{pattern.differentCount.toLocaleString()} 行</span><small>{fullDetails ? '已存明细' : '已存样本'} <span>{pattern.sampleCount.toLocaleString()} 条</span></small></button>)}
-        {collapsedPattern && <div className="pattern-switch collapsed-pattern-summary" role="note">其余 {collapsedPattern.collapsedPatternCount.toLocaleString()} 种组合，共 {collapsedPattern.differentCount.toLocaleString()} 条差异{fullDetails ? '；请在“全部字段差异”中查看明细。' : '，未保存样本'}</div>}
+        {collapsedPattern && <div className="pattern-switch collapsed-pattern-summary" role="note">其余 {collapsedPattern.collapsedPatternCount.toLocaleString()} 种组合，共 {collapsedPattern.differentCount.toLocaleString()} 条差异{collapsedDetailDescription}</div>}
       </div>}
       {showSamples && samples.isLoading && <ContentState state="loading" title={fullDetails ? '正在读取明细' : '正在读取样本'} />}
       {showSamples && samples.isError && <ContentState state="error" title={fullDetails ? '明细读取失败' : '样本读取失败'} description={samples.error.message} action={<button className="button ghost" onClick={() => { void result.refetch(); void samples.refetch() }}>刷新结果</button>} />}
