@@ -45,16 +45,11 @@ public class ResultAggregate implements Serializable {
         difference(type,key,differingFields,1,factory);
     }
     void difference(String type,String key,List<String> differingFields,long occurrences,Supplier<SampleRow> factory) {
-        if(occurrences<=0) throw new IllegalArgumentException("差异行数必须为正数");
-        switch(type) { case "2" -> onlyDestination=Math.addExact(onlyDestination,occurrences); case "3" -> onlyOrigin=Math.addExact(onlyOrigin,occurrences); case "4" -> different=Math.addExact(different,occurrences); default -> throw new IllegalArgumentException("未知差异类型"); }
+        countDifference(type,differingFields,occurrences);
         SampleRow[] cached=new SampleRow[1];
         Supplier<SampleRow> sample=()->{ if(cached[0]==null) cached[0]=factory.get();return cached[0]; };
         PatternStats stats=null;
         if("4".equals(type)) {
-            for(String field:new HashSet<>(differingFields)) {
-                requireFieldName(field);
-                fieldCounts.merge(field,occurrences,Math::addExact);
-            }
             FieldPattern pattern=new FieldPattern(differingFields);
             if(retainedPatternIds==null||retainedPatternIds.contains(pattern.id)) {
                 stats=patterns.get(pattern.id);
@@ -71,6 +66,16 @@ public class ResultAggregate implements Serializable {
             if(eligible(target,sampleKey,limit)) put(target,sampleKey,limit,sample.get());
         }
         if(patternSampleCount()>MAX_PATTERN_SAMPLES) throw new IllegalArgumentException("字段组合样本超过"+MAX_PATTERN_SAMPLES+"条，请降低样本上限");
+    }
+    void countDifference(String type,List<String> differingFields,long occurrences) {
+        if(occurrences<=0) throw new IllegalArgumentException("差异行数必须为正数");
+        switch(type) { case "2" -> onlyDestination=Math.addExact(onlyDestination,occurrences); case "3" -> onlyOrigin=Math.addExact(onlyOrigin,occurrences); case "4" -> different=Math.addExact(different,occurrences); default -> throw new IllegalArgumentException("未知差异类型"); }
+        if("4".equals(type)) {
+            for(String field:new HashSet<>(differingFields)) {
+                requireFieldName(field);
+                fieldCounts.merge(field,occurrences,Math::addExact);
+            }
+        }
     }
     ResultAggregate merge(ResultAggregate other) {
         if(limit!=other.limit||patternSampleLimit!=other.patternSampleLimit||!Objects.equals(retainedPatternIds,other.retainedPatternIds)) throw new IllegalArgumentException("样本阈值或保留组合不一致");

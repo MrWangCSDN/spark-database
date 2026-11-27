@@ -14,7 +14,7 @@ public class DailyResultWorkbookWriter {
     private static final long MAX_EXACT_EXCEL_INTEGER=9_007_199_254_740_992L;
     private static final String[] SUMMARY_FIXED={"领域"};
     private static final String[] DETAIL_FIXED={"领域","表","负责人"};
-    private static final String[] FIELD_HEADERS={"领域","表","负责人","字段名称","差异数量"};
+    private static final String[] FIELD_HEADERS={"领域","表","负责人","字段名称","差异数量","真实表名","配置名称","查询条件"};
 
     public byte[] write(DailyResultExportData data) {
         try(var workbook=new XSSFWorkbook();var output=new ByteArrayOutputStream()) {
@@ -53,14 +53,16 @@ public class DailyResultWorkbookWriter {
         for(var section:data.sections()) {
             int headerRow=rowIndex++;
             headers(sheet,headerRow,DETAIL_FIXED,section.pair(),styles.header);
+            var heading=sheet.getRow(headerRow);text(heading,8,"真实表名",styles.header);text(heading,9,"配置名称",styles.header);text(heading,10,"查询条件",styles.header);
             for(var item:section.tableRows()) {
                 var row=sheet.createRow(rowIndex++);
                 text(row,0,item.domain(),styles.text);
                 text(row,1,item.tableName(),styles.text);
                 text(row,2,item.reviser(),styles.text);
                 numbers(row,3,item.originCount(),item.destinationCount(),item.onlyOriginCount(),item.onlyDestinationCount(),item.differentCount(),styles.number);
+                text(row,8,item.sourceTableName(),styles.text);text(row,9,item.configurationName(),styles.text);text(row,10,excelScope(item.configurationScope()),styles.scope);
             }
-            table(sheet,headerRow,rowIndex-1,7,"TableSection"+(++sectionNumber));
+            table(sheet,headerRow,rowIndex-1,10,"TableSection"+(++sectionNumber));
             rowIndex++;
         }
         sheet.createFreezePane(0,1);
@@ -81,7 +83,7 @@ public class DailyResultWorkbookWriter {
                     other.pair().destinationDatabaseName().equalsIgnoreCase(pair.destinationDatabaseName())).count()>1;
                 String label=pair.originDatabaseName()+" → "+pair.destinationDatabaseName();
                 if(sameNamedPair) label+="（数据库编号："+pair.originDatabaseId()+" → "+pair.destinationDatabaseId()+"）";
-                title(sheet,rowIndex++,4,label,styles.title);
+                title(sheet,rowIndex++,7,label,styles.title);
             }
             int headerRow=rowIndex++;
             var header=sheet.createRow(headerRow);
@@ -93,6 +95,7 @@ public class DailyResultWorkbookWriter {
                 text(row,2,item.reviser(),styles.text);
                 text(row,3,item.fieldName(),styles.text);
                 number(row,4,item.differentCount(),styles.number);
+                text(row,5,item.sourceTableName(),styles.text);text(row,6,item.configurationName(),styles.text);text(row,7,excelScope(item.configurationScope()),styles.scope);
                 var anchor=helper.createClientAnchor();
                 anchor.setCol1(1);anchor.setCol2(5);anchor.setRow1(row.getRowNum());anchor.setRow2(row.getRowNum()+2);
                 var comment=drawing.createCellComment(anchor);
@@ -100,7 +103,7 @@ public class DailyResultWorkbookWriter {
                 comment.setString(helper.createRichTextString("配置编号："+item.bcompIndex()));
                 row.getCell(1).setCellComment(comment);
             }
-            table(sheet,headerRow,rowIndex-1,4,"FieldSection"+(++sectionNumber));
+            table(sheet,headerRow,rowIndex-1,7,"FieldSection"+(++sectionNumber));
             rowIndex++;
         }
         sheet.createFreezePane(0,multiplePairs?2:1);
@@ -108,7 +111,7 @@ public class DailyResultWorkbookWriter {
         sheet.setColumnWidth(1,30*256);
         sheet.setColumnWidth(2,28*256);
         sheet.setColumnWidth(3,32*256);
-        sheet.setColumnWidth(4,20*256);
+        sheet.setColumnWidth(4,20*256);sheet.setColumnWidth(5,30*256);sheet.setColumnWidth(6,30*256);sheet.setColumnWidth(7,60*256);
     }
 
     private static void title(XSSFSheet sheet,int rowIndex,int lastColumn,String label,CellStyle style) {
@@ -129,6 +132,14 @@ public class DailyResultWorkbookWriter {
         text(row,column++,"仅"+origin+"存在",style);
         text(row,column++,"仅"+destination+"存在",style);
         text(row,column,"主键相同、字段不同",style);
+    }
+
+    private static String excelScope(String value) {
+        if(value==null || value.length()<=32767) return value;
+        String suffix="…（查询条件过长，已截断）";
+        int length=32767-suffix.length();
+        if(Character.isHighSurrogate(value.charAt(length-1))) length--;
+        return value.substring(0,length)+suffix;
     }
 
     private static void text(Row row,int column,String value,CellStyle style) {
@@ -170,16 +181,18 @@ public class DailyResultWorkbookWriter {
         if(details) {sheet.setColumnWidth(1,30*256);sheet.setColumnWidth(2,28*256);metricStart=3;}
         for(int column=metricStart;column<metricStart+4;column++) sheet.setColumnWidth(column,18*256);
         sheet.setColumnWidth(metricStart+4,24*256);
+        if(details) {sheet.setColumnWidth(8,30*256);sheet.setColumnWidth(9,30*256);sheet.setColumnWidth(10,60*256);}
     }
 
     private static final class Styles {
-        final CellStyle title,header,text,number;
+        final CellStyle title,header,text,number,scope;
         Styles(XSSFWorkbook workbook) {
             var titleFont=workbook.createFont();titleFont.setBold(true);titleFont.setFontHeightInPoints((short)14);
             title=workbook.createCellStyle();title.setFont(titleFont);title.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());title.setFillPattern(FillPatternType.SOLID_FOREGROUND);title.setFont(white(workbook,titleFont));
             var headerFont=workbook.createFont();headerFont.setBold(true);headerFont.setColor(IndexedColors.WHITE.getIndex());
             header=workbook.createCellStyle();header.setFont(headerFont);header.setFillForegroundColor(IndexedColors.BLUE_GREY.getIndex());header.setFillPattern(FillPatternType.SOLID_FOREGROUND);header.setWrapText(true);
             text=workbook.createCellStyle();
+            scope=workbook.createCellStyle();scope.setWrapText(true);
             number=workbook.createCellStyle();number.setDataFormat(workbook.createDataFormat().getFormat("#,##0"));
         }
         private static Font white(XSSFWorkbook workbook,Font source) {

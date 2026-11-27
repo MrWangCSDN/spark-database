@@ -9,6 +9,19 @@ import java.util.*;
 import static org.assertj.core.api.Assertions.*;
 
 class DailyResultWorkbookWriterTest {
+    @Test void keepsLongSqlScopesExportableWithAnExplicitCellTruncationMarker() throws Exception {
+        String scope="x".repeat(40000);
+        var pair=new DailyResultExportData.DatabasePair(1L,"旧库",2L,"新库");
+        var data=new DailyResultExportData.DatabaseSection(pair,List.of(),
+            List.of(new DailyResultExportData.TableRow(1,"存款组","a_1","—",1,1,0,0,1,"a","配置乙",scope)),
+            List.of(new DailyResultExportData.FieldRow(1,"存款组","a_1","—","amount",1,"a","配置乙",scope)));
+        try(var workbook=workbook(data)) {
+            for(String value:List.of(workbook.getSheetAt(1).getRow(1).getCell(10).getStringCellValue(),
+                                    workbook.getSheetAt(2).getRow(1).getCell(7).getStringCellValue())) {
+                assertThat(value).hasSize(32767).endsWith("…（查询条件过长，已截断）");
+            }
+        }
+    }
     @Test void writesThreeSheetsWithDynamicHeadersAndNoOldTitleRows() throws Exception {
         var customer=section(1L,"客户库",2L,"历史库","客户","客户表",100,90,12,2,6);
         var core=section(3L,"核心库",4L,"新库","支付","支付表",17,28,4,6,8);
@@ -44,7 +57,7 @@ class DailyResultWorkbookWriterTest {
             new DailyResultExportData.FieldRow(1,"存款组","账户","—","LARGE",200000000)));
         try(var workbook=workbook(data)) {
             var sheet=workbook.getSheetAt(2);
-            assertThat((Iterable<Cell>)sheet.getRow(0)).extracting(Cell::getStringCellValue).containsExactly("领域","表","负责人","字段名称","差异数量");
+            assertThat((Iterable<Cell>)sheet.getRow(0)).extracting(Cell::getStringCellValue).containsExactly("领域","表","负责人","字段名称","差异数量","真实表名","配置名称","查询条件");
             assertThat(sheet.getRow(1).getCell(3).getStringCellValue()).isEqualTo("A");
             assertThat(sheet.getRow(1).getCell(4).getNumericCellValue()).isEqualTo(260d);
             assertThat(sheet.getRow(2).getCell(4).getNumericCellValue()).isEqualTo(180d);
@@ -53,14 +66,14 @@ class DailyResultWorkbookWriterTest {
             assertThat(sheet.getRow(1).getCell(1).getCellComment().getString().getString()).contains("配置编号：1");
             assertThat(sheet.getPaneInformation().getHorizontalSplitPosition()).isEqualTo((short)1);
             assertThat(sheet.getTables()).hasSize(1);
-            assertThat(sheet.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:E4");
+            assertThat(sheet.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:H4");
         }
     }
     @Test void keepsEmptyFieldSheetHeadersWithoutInventingZeroRows() throws Exception {
         try(var workbook=workbook(section(1L,"来源",2L,"目标","领域","表",0,0,0,0,0))) {
             var sheet=workbook.getSheetAt(2);
             assertThat(sheet.getPhysicalNumberOfRows()).isEqualTo(1);
-            assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short)5);
+            assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short)8);
             assertThat(sheet.getTables()).isEmpty();
         }
     }

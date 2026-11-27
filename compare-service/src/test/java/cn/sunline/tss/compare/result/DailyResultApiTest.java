@@ -21,6 +21,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class DailyResultApiTest {
     JdbcTemplate jdbc;DailyResultRepository repository;MockMvc mvc;
+    @Test void exportsFrozenConfigurationMetadataAfterAllCurrentConfigurationHasChanged() throws Exception {
+        jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET CONFIGURATION_NAME='a_1',SOURCE_TABLE_NAME='a',CONFIGURATION_DISPLAY_NAME='配置乙',CONFIGURATION_SCOPE='b=2'");
+        jdbc.update("INSERT INTO TSS_BCOMP_CONF_NEW(BCOMP_INDEX,BCOMP_NAME,SOURCE_TABLE_NAME,CONFIGURATION_NAME,CONFIGURATION_SCOPE) VALUES(1,'different','changed','新名称','changed=1')");
+        mvc.perform(get("/api/results/1/20260920")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.configurationName").value("a_1"))
+            .andExpect(jsonPath("$.sourceTableName").value("a"))
+            .andExpect(jsonPath("$.configurationDisplayName").value("配置乙"))
+            .andExpect(jsonPath("$.configurationScope").value("b=2"));
+        byte[] bytes=mvc.perform(get("/api/results/export").param("date","20260920")).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try(var book=new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var tables=book.getSheet("表明细");var fields=book.getSheet("表字段明细");
+            assertThat(tables.getRow(0).getCell(8).getStringCellValue()).isEqualTo("真实表名");
+            assertThat(tables.getRow(0).getCell(9).getStringCellValue()).isEqualTo("配置名称");
+            assertThat(tables.getRow(0).getCell(10).getStringCellValue()).isEqualTo("查询条件");
+            assertThat(tables.getRow(1).getCell(1).getStringCellValue()).isEqualTo("a_1");
+            assertThat(tables.getRow(1).getCell(8).getStringCellValue()).isEqualTo("a");
+            assertThat(tables.getRow(1).getCell(9).getStringCellValue()).isEqualTo("配置乙");
+            assertThat(tables.getRow(1).getCell(10).getStringCellValue()).isEqualTo("b=2");
+            assertThat(fields.getRow(1).getCell(1).getStringCellValue()).isEqualTo("a_1");
+            assertThat(fields.getRow(1).getCell(5).getStringCellValue()).isEqualTo("a");
+            assertThat(fields.getRow(1).getCell(6).getStringCellValue()).isEqualTo("配置乙");
+            assertThat(fields.getRow(1).getCell(7).getStringCellValue()).isEqualTo("b=2");
+        }
+    }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";MODE=PostgreSQL;DB_CLOSE_DELAY=-1","sa","");
         new ResourceDatabasePopulator(new ClassPathResource("legacy-schema.sql")).execute(ds);
@@ -76,6 +100,30 @@ class DailyResultApiTest {
         assertThat(repository.exportSnapshot("20260920").results().get(0).summary()).isEqualTo(summary);
     }
 
+    @Test void fullResultsPageAcrossEveryPatternAndPreserveLongCounts() throws Exception {
+        jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET DETAIL_LIMIT=-1,ORIGIN_COUNT=3000000000,DESTINATION_COUNT=3000000000,MATCHED_COUNT=0,ONLY_ORIGIN_COUNT=0,ONLY_DESTINATION_COUNT=0,DIFFERENT_COUNT=3000000000,DIFFERENT_SAMPLES=3000000000");
+        jdbc.update("INSERT INTO TSS_BCOMP_FIELD_DIFF_NEW VALUES(1,'20260920','v1','__OTHER__','[]',3000000000,3000000000,2999999999)");
+        jdbc.update("INSERT INTO TSS_BCOMP_DTL_NEW(BCOMP_INDEX,RESULT_DATE,LINE_RESULT,SAMPLE_NO,COMP_INDEX_STR,DETAIL_JSON,PATTERN_ID) VALUES(1,'20260920','4',2147483650,'hidden-combination','{}',?)","a".repeat(64));
+        mvc.perform(get("/api/results/1/20260920/differences").param("type","4").param("version","v1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(3_000_000_000L))
+            .andExpect(jsonPath("$.items[0].businessKey").value("hidden-combination"));
+        mvc.perform(get("/api/results/1/20260920/differences").param("type","4").param("version","v1").param("page","2147483648").param("size","1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.page").value(2_147_483_648L));
+        mvc.perform(get("/api/results/1/20260920/field-patterns").param("version","v1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$[0].sampleCount").value(3_000_000_000L))
+            .andExpect(jsonPath("$[0].collapsedPatternCount").value(2_999_999_999L));
+    }
+
+    @Test void stageMaintenanceOnlyReclaimsRunsWhoseTaskHasFinishedOrDisappeared() {
+        for(String batch:java.util.List.of("active","finished","missing")) {
+            jdbc.update("INSERT INTO TSS_BCOMP_FULL_RUN_NEW VALUES(?,1,'20260920',?,'D','20000101000000')",batch,batch);
+            jdbc.update("INSERT INTO TSS_BCOMP_FULL_STAGE_NEW(RUN_ID,PART_ID,ATTEMPT_ID,LOCAL_NO,LINE_RESULT,COMP_INDEX_STR,DETAIL_JSON) VALUES(?,0,1,1,'2','key','{}')",batch);
+        }
+        jdbc.update("INSERT INTO TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) VALUES(1,'20260920','active','D','2'),(1,'20260920','finished','D','4')");
+        repository.removeFinishedStages();
+        assertThat(jdbc.queryForList("SELECT RUN_ID FROM TSS_BCOMP_FULL_STAGE_NEW",String.class)).containsExactly("active");
+    }
+
     @Test void allResultsAreNotLimitedByListPagination() {
         jdbc.update("INSERT INTO TSS_BCOMP_RESULT_NEW(BCOMP_INDEX,RESULT_DATE,RUN_ID,TASK_BUSI_DATE,TASK_BATCH,TIME_NODE,CONFIGURATION_NAME,CONFIGURATION_MODULE,ORIGIN_DATABASE_ID,ORIGIN_DATABASE_NAME,DESTINATION_DATABASE_ID,DESTINATION_DATABASE_NAME,ORIGIN_COUNT,DESTINATION_COUNT,MATCHED_COUNT,ONLY_ORIGIN_COUNT,ONLY_DESTINATION_COUNT,DIFFERENT_COUNT,DETAIL_LIMIT,ORIGIN_SAMPLES,DESTINATION_SAMPLES,DIFFERENT_SAMPLES,PUBLISHED_AT,DETAILS_EXPIRED) VALUES(2,'20260920','v2','20260921','b1','D','账户表','dept',3,'aaa',4,'bbb',10,11,9,1,2,0,100,0,0,0,'20260922120100','0')");
         assertThat(repository.list("20260920",0,1).results().items()).hasSize(1);
@@ -113,12 +161,12 @@ class DailyResultApiTest {
             assertThat(tables.getRow(0).getCell(2).getStringCellValue()).isEqualTo("负责人");
             assertThat(tables.getRow(1).getCell(2).getStringCellValue()).isEqualTo("王山河(c-wangsh8)");
             assertThat(tables.getRow(1).getCell(3).getNumericCellValue()).isEqualTo(1000005d);
-            assertThat(tables.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:H2");
+            assertThat(tables.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:K2");
             assertThat(fields.getRow(0).getCell(2).getStringCellValue()).isEqualTo("负责人");
             assertThat(fields.getRow(1).getCell(2).getStringCellValue()).isEqualTo("王山河(c-wangsh8)");
             assertThat(fields.getRow(1).getCell(3).getStringCellValue()).isEqualTo("A");
             assertThat(fields.getRow(1).getCell(4).getNumericCellValue()).isEqualTo(2d);
-            assertThat(fields.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:E2");
+            assertThat(fields.getTables().get(0).getCTTable().getAutoFilter().getRef()).isEqualTo("A1:H2");
         }
     }
     @Test void exportsPlaceholderForHistoricalResultWithoutReviser() throws Exception {

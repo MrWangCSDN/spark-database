@@ -21,6 +21,7 @@ import java.util.*;
 public class DailyResultRepository {
     private static final Logger log=LoggerFactory.getLogger(DailyResultRepository.class);
     private final JdbcTemplate jdbc;
+    private final JdbcTemplate maintenance;
     private final TransactionTemplate transaction;
     private final TransactionTemplate exportTransaction;
     private final ObjectMapper json;
@@ -31,14 +32,15 @@ public class DailyResultRepository {
         rs.getString("REVISER_NAME"),rs.getString("REVISER_USERNAME"),rs.getObject("ORIGIN_DATABASE_ID",Long.class),
         rs.getString("ORIGIN_DATABASE_NAME"),rs.getObject("DESTINATION_DATABASE_ID",Long.class),rs.getString("DESTINATION_DATABASE_NAME"),
         rs.getLong("ORIGIN_COUNT"),rs.getLong("DESTINATION_COUNT"),rs.getLong("MATCHED_COUNT"),rs.getLong("ONLY_ORIGIN_COUNT"),
-        rs.getLong("ONLY_DESTINATION_COUNT"),rs.getLong("DIFFERENT_COUNT"),rs.getInt("DETAIL_LIMIT"),rs.getInt("ORIGIN_SAMPLES"),
-        rs.getInt("DESTINATION_SAMPLES"),rs.getInt("DIFFERENT_SAMPLES"),rs.getString("PUBLISHED_AT"),rs.getString("DETAILS_EXPIRED"));
+        rs.getLong("ONLY_DESTINATION_COUNT"),rs.getLong("DIFFERENT_COUNT"),rs.getInt("DETAIL_LIMIT"),rs.getLong("ORIGIN_SAMPLES"),
+        rs.getLong("DESTINATION_SAMPLES"),rs.getLong("DIFFERENT_SAMPLES"),rs.getString("PUBLISHED_AT"),rs.getString("DETAILS_EXPIRED"),rs.getString("SOURCE_TABLE_NAME"),rs.getString("CONFIGURATION_DISPLAY_NAME"),rs.getString("CONFIGURATION_SCOPE"));
     public DailyResultRepository(DataSource source,ObjectMapper json) {
         this(source, json, MetadataSqlDialect.forType(MetadataDbType.GAUSSDB));
     }
     @Autowired
     public DailyResultRepository(DataSource source,ObjectMapper json, MetadataSqlDialect dialect) {
         jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(30);
+        maintenance=new JdbcTemplate(source);
         transaction=new TransactionTemplate(new DataSourceTransactionManager(source));this.json=json;this.dialect=dialect;
         exportTransaction=new TransactionTemplate(new DataSourceTransactionManager(source));
         exportTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -47,7 +49,7 @@ public class DailyResultRepository {
     public record ConnectionGroup(Long originDatabaseId,String originDatabaseName,Long destinationDatabaseId,String destinationDatabaseName,long objectCount) {}
     public record Results(PageResult<DailyResultSummary> results,List<ConnectionGroup> connections) {}
     public record Sample(String businessKey,JsonNode detail) {}
-    public record Samples(DailyResultSummary summary,List<Sample> items,int page,int size,long total) {}
+    public record Samples(DailyResultSummary summary,List<Sample> items,long page,int size,long total) {}
     public Results list(String date,int page,int size) {
         return list(date,page,size,null,null,null);
     }
@@ -59,7 +61,7 @@ public class DailyResultRepository {
             String value=contains(domain);args.add(value);args.add(value);
         }
         if(configurationName!=null&&!configurationName.isBlank()) {
-            where.append(" AND LOWER(COALESCE(CONFIGURATION_NAME,'')) LIKE ? ESCAPE '!'");args.add(contains(configurationName));
+            where.append(" AND (LOWER(COALESCE(CONFIGURATION_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(SOURCE_TABLE_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(CONFIGURATION_DISPLAY_NAME,'')) LIKE ? ESCAPE '!')");String value=contains(configurationName);args.add(value);args.add(value);args.add(value);
         }
         if(reviser!=null&&!reviser.isBlank()) {
             where.append(" AND (LOWER(COALESCE(REVISER_NAME,'')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(REVISER_USERNAME,'')) LIKE ? ESCAPE '!')");
@@ -108,7 +110,7 @@ public class DailyResultRepository {
                     }
                     try {
                         patterns.computeIfAbsent(index,ignored->new ArrayList<>()).add(new FieldPatternResult(
-                            rs.getString(3),parseExportFields(rs.getString(4)),rs.getLong(5),rs.getInt(6),rs.getInt(7)));
+                            rs.getString(3),parseExportFields(rs.getString(4)),rs.getLong(5),rs.getLong(6),rs.getLong(7)));
                     } catch(java.sql.SQLException error) {
                         log.warn("Daily result export invalid: date={}, configurationId={}, reason=legacy_pattern_read_failed",date,index);
                         throw error;
@@ -140,17 +142,20 @@ public class DailyResultRepository {
         return new DailyResultExportSnapshot(results);
     }
     private DailyResultSummary find(long index,String date,boolean lock) {
-        var rows=jdbc.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?"+(lock?" FOR UPDATE":""),MAPPER,index,date);
+        return find(jdbc,index,date,lock);
+    }
+    private DailyResultSummary find(JdbcTemplate queries,long index,String date,boolean lock) {
+        var rows=queries.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?"+(lock?" FOR UPDATE":""),MAPPER,index,date);
         if(rows.isEmpty()) throw ApiException.notFound("RESULT_NOT_FOUND","该核对日期尚无成功发布的结果");
         return rows.get(0);
     }
-    public record FieldPatternResult(String patternId,List<String> fields,long differentCount,int sampleCount,int collapsedPatternCount) {}
+    public record FieldPatternResult(String patternId,List<String> fields,long differentCount,long sampleCount,long collapsedPatternCount) {}
     public List<FieldPatternResult> fieldPatterns(long index,String date,String version) {
         return transaction.execute(status->{
             var summary=find(index,date,true);
             requireVersion(summary,version);
             return jdbc.query("SELECT PATTERN_ID,FIELDS_JSON,DIFFERENT_COUNT,SAMPLE_COUNT,COLLAPSED_PATTERN_COUNT FROM TSS_BCOMP_FIELD_DIFF_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND RUN_ID=? ORDER BY CASE WHEN PATTERN_ID='__OTHER__' THEN 1 ELSE 0 END,DIFFERENT_COUNT DESC,PATTERN_ID ASC",
-                (rs,n)->new FieldPatternResult(rs.getString(1),parseFields(rs.getString(2)),rs.getLong(3),rs.getInt(4),rs.getInt(5)),index,date,version);
+                (rs,n)->new FieldPatternResult(rs.getString(1),parseFields(rs.getString(2)),rs.getLong(3),rs.getLong(4),rs.getLong(5)),index,date,version);
         });
     }
     private List<String> parseExportFields(String value) throws java.sql.SQLException {
@@ -173,7 +178,7 @@ public class DailyResultRepository {
     private static void requireVersion(DailyResultSummary summary,String version) {
         if(!summary.runId().equals(version)) throw ApiException.conflict("RESULT_REPLACED","当天结果已更新，请刷新后查看");
     }
-    public Samples samples(long index,String date,String type,String version,String patternId,int page,int size) {
+    public Samples samples(long index,String date,String type,String version,String patternId,long page,int size) {
         return transaction.execute(status->{
             var summary=find(index,date,true);
             requireVersion(summary,version);
@@ -187,7 +192,7 @@ public class DailyResultRepository {
             } else total=switch(type) { case "2" -> summary.destinationSamples();case "3" -> summary.originSamples();default -> summary.differentSamples(); };
             String sql="SELECT COMP_INDEX_STR,DETAIL_JSON FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? AND LINE_RESULT=?"
                 +(patternId==null?"":" AND PATTERN_ID=?")+" ORDER BY SAMPLE_NO";
-            var pageSql=dialect.page(sql,(long)page*size,size);
+            var pageSql=dialect.page(sql,Math.multiplyExact(page,size),size);
             RowMapper<Sample> mapper=(rs,n)->{
                 try { return new Sample(rs.getString(1),json.readTree(rs.getString(2))); }
                 catch(java.io.IOException e){ throw new java.sql.SQLException("差异样本格式错误",e); }
@@ -199,24 +204,40 @@ public class DailyResultRepository {
             return new Samples(summary,rows,page,size,total);
         });
     }
+    /** Only terminal or removed tasks release orphaned attempts; long-running jobs keep their staging rows. */
+    public void removeFinishedStages() {
+        String terminal=" NOT EXISTS (SELECT 1 FROM TSS_BCOMP_TASK_NEW t"
+            +" WHERE t.BCOMP_INDEX=TSS_BCOMP_FULL_RUN_NEW.BCOMP_INDEX AND t.TASK_BUSI_DATE=TSS_BCOMP_FULL_RUN_NEW.TASK_BUSI_DATE"
+            +" AND t.TASK_BATCH=TSS_BCOMP_FULL_RUN_NEW.TASK_BATCH AND t.BCOMP_TIME_NODE=TSS_BCOMP_FULL_RUN_NEW.TIME_NODE AND t.TASK_STATE='2')";
+        var candidates=dialect.limit("SELECT RUN_ID FROM TSS_BCOMP_FULL_RUN_NEW WHERE"+terminal+" ORDER BY CREATED_AT",100);
+        for(String run:maintenance.queryForList(candidates.sql(),String.class,candidates.parameters().toArray())) {
+            maintenance.execute("DELETE FROM TSS_BCOMP_FULL_RUN_NEW WHERE RUN_ID=? AND"+terminal,
+                (PreparedStatementCallback<Void>)ps->{ ps.setString(1,run);ps.execute();return null; });
+        }
+    }
+
     /** Lock/recheck each bounded publication, sharing publisher lock order on the summary row. */
     public int expire(String cutoff) {
         var candidateSql=dialect.limit("SELECT BCOMP_INDEX,RESULT_DATE FROM TSS_BCOMP_RESULT_NEW WHERE DETAILS_EXPIRED='0' AND PUBLISHED_AT<? ORDER BY PUBLISHED_AT",100);
         var candidateParams=new ArrayList<Object>();candidateParams.add(cutoff);candidateParams.addAll(candidateSql.parameters());
-        var candidates=jdbc.query(candidateSql.sql(),
+        var candidates=maintenance.query(candidateSql.sql(),
             (rs,n)->Map.entry(rs.getLong(1),rs.getString(2)),candidateParams.toArray());
         int expired=0;
         for(var candidate:candidates) {
             Boolean changed=transaction.execute(status->{
-                var locked=jdbc.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? FOR UPDATE",
+                var locked=maintenance.query("SELECT * FROM TSS_BCOMP_RESULT_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=? FOR UPDATE",
                     MAPPER,candidate.getKey(),candidate.getValue());
                 // Import cleanup may have removed a candidate after the outer selection.
                 if(locked.isEmpty()) return false;
                 var summary=locked.get(0);
                 if("1".equals(summary.detailsExpired()) || summary.publishedAt().compareTo(cutoff)>=0) return false;
-                jdbc.update("DELETE FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
-                jdbc.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET SAMPLE_COUNT=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
-                jdbc.update("UPDATE TSS_BCOMP_RESULT_NEW SET DETAILS_EXPIRED='1',ORIGIN_SAMPLES=0,DESTINATION_SAMPLES=0,DIFFERENT_SAMPLES=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
+                maintenance.execute("DELETE FROM TSS_BCOMP_DTL_NEW WHERE BCOMP_INDEX=? AND RESULT_DATE=?",
+                    (PreparedStatementCallback<Void>)ps->{
+                        ps.setLong(1,candidate.getKey());ps.setString(2,candidate.getValue());
+                        ps.execute();return null;
+                    });
+                maintenance.update("UPDATE TSS_BCOMP_FIELD_DIFF_NEW SET SAMPLE_COUNT=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
+                maintenance.update("UPDATE TSS_BCOMP_RESULT_NEW SET DETAILS_EXPIRED='1',ORIGIN_SAMPLES=0,DESTINATION_SAMPLES=0,DIFFERENT_SAMPLES=0 WHERE BCOMP_INDEX=? AND RESULT_DATE=?",candidate.getKey(),candidate.getValue());
                 return true;
             });
             if(Boolean.TRUE.equals(changed)) expired++;

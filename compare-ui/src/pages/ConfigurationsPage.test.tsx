@@ -233,3 +233,17 @@ test('limits typed search keywords to 100 characters before requesting the serve
   await user.click(screen.getByRole('button', { name: '查询' }))
   await waitFor(() => expect(requests[requests.length - 1]?.searchParams.get('keyword')).toBe('x'.repeat(100)))
 })
+
+test('shows each configuration code beside its shared physical source and independent scope', async () => {
+  server.use(http.get('/api/configurations', () => HttpResponse.json({ items: [
+    { ...configuration(1, 'a'), sourceTableName: 'a', configurationName: '配置甲', configurationScope: 'a=1' },
+    { ...configuration(2, 'a_1'), sourceTableName: 'a', configurationName: '配置乙', configurationScope: 'b=2' }
+  ], page: 0, size: 20, total: 2 })))
+  renderPage(<ConfigurationsPage />, '/configurations')
+  expect(await screen.findByText('配置甲')).toBeVisible()
+  expect(screen.getByText('配置乙')).toBeVisible()
+  expect(screen.getByText('a_1')).toBeVisible()
+  expect(screen.getByText('a=1')).toBeVisible()
+  expect(screen.getByText('b=2')).toBeVisible()
+  expect(screen.getAllByRole('columnheader').map(node => node.textContent)).toContain('真实表名')
+})

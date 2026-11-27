@@ -8,7 +8,7 @@
 
 ## 不变的兼容边界
 
-通过 `sql/create_bcomp_new.sql` 新建十四张空表，包含九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表和一张完整字段统计表。枚举、忽略值和差异字段依赖同样使用独占新表。
+通过 `sql/create_bcomp_new.sql` 新建十九张独立表（业务表为空，编号分配器含一行初始状态），包含九张核对业务表、两张批次表、一张每日汇总表、一张差异字段组合汇总表、一张完整字段统计表、三张全量明细暂存相关表和两张永久配置身份/编号分配表。枚举、忽略值和差异字段依赖同样使用独占新表。
 
 | 运行时表 | 用途 |
 |---|---|
@@ -22,12 +22,13 @@
 | TSS_BCOMP_ENUM_NEW / TSS_IGNORE_VALUE_NEW | 枚举映射与忽略值 |
 | TSS_BCOMP_BATCH_NEW / TSS_BCOMP_BATCH_ITEM_NEW | 批次请求身份、任务清单与名称快照 |
 | TSS_BCOMP_TASK_NEW | 原任务状态与统计 |
-| TSS_BCOMP_DTL_NEW | 原差异明细 |
+| TSS_BCOMP_DTL_NEW | 已发布的差异明细 |
+| TSS_BCOMP_FULL_RUN_NEW / TSS_BCOMP_FULL_STAGE_NEW / TSS_BCOMP_FULL_WIN_NEW | 全量任务运行标识、各尝试暂存行及获胜分区清单 |
 | TSS_BCOMP_DIFFFIELD_NEW | 原作业保留的预编译查询依赖 |
 
 类型代码、从1开始的字段位置、`${HDRQ}`替换、`|+|`内容分隔符、重复键`#MD5`、明细结果代码全部保留。服务发送原来的21个位置参数。可选字段 `BCOMP_SHARD_STRATEGY`、`BCOMP_READ_MODE` 缺失时沿用原回退行为。
 
-Spark 固定使用主键 HASH 读取，全量计数与限额样本由 Driver 事务发布；兼容 BIGINT/NUMERIC 字段位置。原文件 SHA-256 见 `docs/migration/source-provenance.json`。
+Spark 固定使用主键 HASH 读取，全量计数及按表配置保存的差异明细由 Driver 事务发布；兼容 BIGINT/NUMERIC 字段位置。原文件 SHA-256 见 `docs/migration/source-provenance.json`。
 
 ## 构建与测试
 
@@ -138,7 +139,7 @@ export TSS_METADATA_DRIVER='your.driver.Class'
 
 元数据库密码在 `config/bd.env` 中使用 `TSS_METADATA_PASSWORD='ENC(...)'`；`JASYPT_ENCRYPTOR_PASSWORD` 由外部运行环境注入，不能放进 `bd.env`、源码或源码包。可在部署目录执行 `bin/encrypt-password.sh`，按提示输入明文密码，将输出密文填入 `bd.env`。加密与解密必须使用同一口令；脚本采用 Jasypt 3.0.5 的 `PBEWITHHMACSHA512ANDAES_256`、随机盐与 IV。启动时会检查密文格式及解密口令是否存在，不会输出密码。`spark.datasource.password` 引用同一个已解密的元库密码。业务库连接密码仍沿用表内现有 AES 协议，不能把这两种密文格式混用。
 
-若要清空全部比对运行记录，先在部署目录执行 `./stop.sh`，再到 Spark Master / YARN 确认本服务提交的比对应用均已结束。随后连接 **bd 元数据库**（使用与服务相同的 schema）执行 `sql/clear_bcomp_runtime_data_new.sql`。脚本清空任务、批次、结果汇总和差异样本六张表，保留核对配置、字段规则及数据库连接；SQL 末尾会查询六张表的剩余行数。确认全为 0 后再执行 `./start.sh`。此操作会永久删除历史运行记录，执行前可先备份元数据库。
+若要清空全部比对运行记录，先在部署目录执行 `./stop.sh`，再到 Spark Master / YARN 确认本服务提交的比对应用均已结束。随后连接 **bd 元数据库**（使用与服务相同的 schema）执行 `sql/clear_bcomp_runtime_data_new.sql`。脚本清空任务、批次、结果汇总和差异明细及全量暂存表，保留核对配置、字段规则及数据库连接；SQL 末尾会查询各表的剩余行数。确认全为 0 后再执行 `./start.sh`。此操作会永久删除历史运行记录，执行前可先备份元数据库。
 
 新服务也支持常规 `spring.datasource.url/username/password/driver-class-name`；若采用这组属性，`password` 同样必须填写 Jasypt `ENC(...)` 密文。元库连接池改为 Hikari；兼容原动态数据源主库键和 `max-active`，其余 Druid 特有监控/过滤器配置不生效。新增连接池调优使用 `spring.datasource.hikari.*` 中文档支持的 `maximum-pool-size`、`minimum-idle`、`connection-timeout`。
 
@@ -202,9 +203,9 @@ Axon 命名方案的新 14 列主配置在原 13 列末尾追加 `bcomp_max_part
 
 已有环境升级：先停止 bd 并确认在途 Spark 作业结束，在服务和 Spark 使用的同一元数据库/schema 执行一次增量脚本：GaussDB/PostgreSQL 使用 `sql/add_bcomp_max_partition_num_new.sql`；GDB/MySQL 使用 `sql/add_bcomp_max_partition_num_gdb.sql`。旧配置上限初始化为 64，保留原配置与结果。先检查列是否已存在，部分执行后不要直接重跑；GDB/MySQL DDL 会隐式提交。随后同步部署新版服务、Spark JAR 和服务内嵌前端。全新空库使用最新 `create_bcomp_new.sql` 或 `create_bcomp_gdb.sql`。应用不自动执行迁移；缺列会明确失败。
 
-Axon-link 样本上限仍可由授权人员配置（0–10000，默认 100，0 表示只保存汇总）。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单。Axon 历史分区数接口和字段只作兼容，不能影响 bd 的实际运行分区数。
+Axon-link 样本上限仍可由授权人员配置（-1 保存全部差异行，0 只保存汇总，1–10000 抽样，默认 100）。Axon 后端部署属性 `replay-database-comparison.partition-admin-emp-nos` 指定授权工号名单，默认空名单。Axon 历史分区数接口和字段只作兼容，不能影响 bd 的实际运行分区数。
 
-样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为兼容值 1、`'HASH'` 和每个差异字段组合的样本上限（0–10000，Axon 新建配置默认 100）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。新版导出还在末尾追加 `reviser_name,reviser_username` 两列，形成 13 列脚本；两列允许 NULL 或最长 100 字符的修订人姓名、用户名。比对端兼容原 8 列、前版 10 列、11 列及新版 13 列脚本，新格式的非法兼容列值、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；运行时不会按这个列值确定实际分区数；全部表配置都必须包含主键。
+样本上限进入不可变版本快照。新 SQL 在 `TSS_BCOMP_CONF_NEW` 的原 8 列之后追加 `bcomp_partition_num,bcomp_shard_strategy,bcomp_sample_limit`，值为兼容值 1、`'HASH'` 和表级差异保存策略（-1 全量、0 汇总、1–10000 抽样，Axon 新建配置默认 100）；业务键仍通过 `TSS_BCOMP_FIELD_NEW.FIELD_INDEX_FLAG` 指定，包含全部联合主键，不需要分区字段标记。新版导出还在末尾追加 `reviser_name,reviser_username` 两列，形成 13 列脚本；两列允许 NULL 或最长 100 字符的修订人姓名、用户名。比对端兼容原 8 列、前版 10 列、11 列及新版 13 列脚本，新格式的非法兼容列值、样本上限、非 HASH 策略或缺失业务键会使整批导入回滚。旧脚本缺少分区数时默认 1，同样执行主键 HASH；运行时不会按这个列值确定实际分区数；全部表配置都必须包含主键。
 
 导入新脚本前，目标元数据库必须已具备 `TSS_BCOMP_CONF_NEW.BCOMP_PARTITION_NUM`、`BCOMP_SHARD_STRATEGY` 和 nullable 的 `BCOMP_SAMPLE_LIMIT` 列（策略列需能保存 `HASH`）；已有元数据库先执行 `sql/add_bcomp_sample_limit_new.sql`，旧行保持 NULL，不回填默认值；应用不会自动修改生产表结构。旧版 Spark 不识别此哈希策略，必须同步升级服务和 Spark 作业 JAR，再使用新版脚本。历史版本已经生成的 SQL 保持不变；样本上限调整需生成新版本。
 
@@ -243,7 +244,7 @@ Spark Driver 按阶段创建、关闭元数据库连接：启动时读取分区/
 
 ## 九张业务表隔离部署
 
-执行 `sql/create_bcomp_new.sql` 创建十二张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
+执行 `sql/create_bcomp_new.sql` 创建十九张空 `_NEW` 表，先设置与服务和 Spark 元数据库一致的 search_path。旧表及其数据不变，不自动迁移。SQL/明细正文使用 TEXT，支持宽表配置。
 
 停止 bd 并等待在途 Spark 作业结束后，同步替换 service 和 Spark 两个 JAR。在数据库连接页面重新维护连接（Axon 脚本使用 ID 1 和 2），从 Axon 选择“新版本（_new 表）”下载并导入配置，再创建小任务测试。旧版本 SQL 不可导入本版 bd。枚举、忽略值及差异字段表均使用 `_NEW` 表；规则表初始为空，启用规则前需维护相应数据。
 
@@ -269,24 +270,30 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 
 批次详情按等待、运行、一致、有差异、执行失败、已取消分别展示。进度按已结束任务数计算。点击“停止批次”并确认后，当前批次等待或运行的任务进入取消状态，服务向其正在运行的 Spark 应用发送终止请求；其他批次和已完成结果不受影响。停止请求返回后仍应在 Spark 页面核实应用终态。重新发起失败项会建立新批次，保留原业务日期、每项核验日期和时点，使用当前配置，配置变化时提示；有差异及已取消任务不属于失败项，不覆盖旧任务与明细。批次保存任务名称和配置摘要，后续重新导入不影响历史列表。
 
-**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用最新 `sql/create_bcomp_new.sql` 一次建齐十四张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
+**已有内网部署升级：先停 bd，在元数据库的正确 schema 下执行一次 `sql/add_bcomp_batch_tables_new.sql`，再替换两个应用 JAR 和前端集成版本。** 此脚本只增加 `TSS_BCOMP_BATCH_NEW`、`TSS_BCOMP_BATCH_ITEM_NEW` 两张表，不修改原九张表、不清理数据。新环境使用最新 `sql/create_bcomp_new.sql` 一次建齐十九张表；不要在已有环境重复运行完整建表脚本。应用不会自动执行 DDL。
 
 现有单表任务仍在 `/tasks` 查询；批次页面只展示本功能创建的批次。控制面变更在单个服务实例内串行化，当前部署按单实例运行；不要同时通过另一实例或外部 SQL 修改正在使用的配置。
 
 
 ## 每日结果与 HASH 唯一读取方式升级
 
-业务键可使用主键或唯一索引字段。各键分量均非空、非空白时，按业务键匹配并使用字段规则比较，同一侧重复的完整键会使任务失败。任一键分量为 NULL、空串或空白时，按业务键与本次 SQL 返回的全部配置字段原始值组成整行身份，分别归并两侧出现次数，再取较小次数作为匹配数，剩余记录计入各侧独有。例如同一原始行在原侧出现 5 次、目标侧出现 3 次，统计为匹配 3 条、原侧独有 2 条。空键整行计次区分 `1.0` 与 `1.00` 等不同原始表示。NULL、空串及字面字符串 `null` 分别编码；样本保留原业务键，相同业务键的重复样本按限额保存。
+业务键可使用主键或唯一索引字段。各键分量均非空、非空白时，按业务键匹配并使用字段规则比较，同一侧重复的完整键会使任务失败。任一键分量为 NULL、空串或空白时，按业务键与本次 SQL 返回的全部配置字段原始值组成整行身份，分别归并两侧出现次数，再取较小次数作为匹配数，剩余记录计入各侧独有。例如同一原始行在原侧出现 5 次、目标侧出现 3 次，统计为匹配 3 条、原侧独有 2 条。空键整行计次区分 `1.0` 与 `1.00` 等不同原始表示。NULL、空串及字面字符串 `null` 分别编码；样本保留原业务键，相同业务键的差额行按所选模式保存。
 
 已部署环境先停止服务并等待所有 Spark 作业结束，在元数据库对应 schema 执行 `sql/add_bcomp_daily_results_new.sql`；首次空库使用 `sql/create_bcomp_new.sql`。重新构建并同时替换服务和 Spark 两个 JAR，保留现场连接、驱动及密码配置。
 
 运行时先读取并校验本表 `BCOMP_MAX_PARTITION_NUM`（默认 64，允许 1～256 整数），再统计两侧本次 SQL 的准确行数，取较大值，按每 100 万行一档向上取二次幂，最后受本表上限约束。两侧使用相同分区数和全部 `FIELD_INDEX_FLAG=1` 字段组成的主键做 HASH。统计或上限读取失败直接使任务失败。`BCOMP_PARTITION_NUM` 仅作历史脚本兼容，运行时忽略。RANGE、NTILE 和分区字段选择已删除。旧策略列和分区标记列只为兼容旧导入格式保留，不能改变读取策略；保存/导入时分区标记清零。旧配置无需单独修改策略值。
 
-每日结果按“配置编号＋核对业务日期”保存一份最新成功结果。核对业务日期优先取 VERIFY_BUSINESS_DATE，否则取 TASK_BUSI_DATE。汇总为全量准确计数：仅一侧存在各保存至多 `BCOMP_SAMPLE_LIMIT` 条；主键相同但内容不同的行按完整差异字段组合分别计数，每个组合各保存至多该上限的样本（0–10000）。例如 `[a]` 与 `[a,b]` 是互斥的两组，组数之和等于该表的字段差异总数。值为 0 时只保存汇总。该列为 NULL（含旧 8/10 列脚本）时使用全局 `BD_DIFF_DETAIL_LIMIT`（默认 100）；显式配置的旧值 1000 不变。结果 `detailLimit` 记录实际采用的上限；重复成功执行原子替换，失败保留上一份成功结果。每个任务最多允许 128 种字段组合、合计 20000 条组合样本，超出时任务失败并保留上次成功结果。字段过长时样本截断并提示，不影响总量统计。`BD_DIFF_RETENTION_DAYS=30` 控制按最后发布时间清理样本，保留汇总，允许 1–3650 天。历史全量明细不自动删除。
+每日结果按配置编号和核对业务日期保留最近一次成功执行。业务日期优先取 VERIFY_BUSINESS_DATE，否则取 TASK_BUSI_DATE。各模式均统计全量。表级 `BCOMP_SAMPLE_LIMIT` 为 NULL 时使用 `BD_DIFF_DETAIL_LIMIT`（0–10000，默认 100），0 只保存汇总，1–10000 保存限额样本。样本模式按两侧独有类别和主要字段组合取样，组合样本合计最多 20000 条。
+
+显式填写 -1 时，执行器按分区分批写入源端独有、目标端独有、字段不同的全部行，包括相同业务键的差额次数。字段不同默认可分页查看全部行，并可筛选数量最多的 127 个组合。该设置只影响明细行数，保留现有展示投影，每行最多 200 个字段、单值最多 1024 个字符，过长时标记截断。结果 `detailLimit=-1` 标识全量。明细和汇总在同一事务发布，同日重跑失败保留上次成功结果。`BD_DIFF_RETENTION_DAYS`（默认 30，范围 1–3650 天）按发布时间清理已发布的明细，保留汇总和字段统计。
+
+**升级全量明细**。先停服务并等待在途 Spark 作业完成。备份元库后，GaussDB 运行 `sql/add_bcomp_full_details_new.sql`，GDB/MySQL 运行 `sql/add_bcomp_full_details_gdb.sql`。它们将三类已存数量、组合样本数、折叠种数和明细序号扩为 BIGINT，创建全量运行、暂存、获胜分区三张表。GDB/MySQL DDL 会隐式提交，若执行中断需核对已完成的语句。空库直接使用对应的最新建表脚本。升级完成后同时替换 service、Spark JAR 与内嵌管理台，再导入带 -1 的脚本。老版本 Spark 会拒绝该值。
+
+每张全量表最多分配 4 个逻辑写分区，每个任务尝试使用 1 个 JDBC 连接，重试或推测执行时尝试可短暂重叠。Driver 只接收各分区的尝试标识、分类与字段计数。元库需为全部暂存明细、同日旧/新结果和事务日志预留空间。成功、失败均清理本次暂存；服务定时回收已终止或消失任务的遗留暂存。
 
 已部署环境在每日结果表已经建好的前提下，先停止 bd 并等待 Spark 作业结束，在同一个元数据库 schema 执行一次 `sql/add_bcomp_field_patterns_new.sql`，再同时替换服务与 Spark JAR。首次空库直接运行最新 `sql/create_bcomp_new.sql`，无需执行增量脚本。Axon-link 数据库升级使用其 `V76__replay_db_compare_sample_limit_default_100.sql`，只改变以后新建行的默认值，不改已有配置及历史版本。旧每日结果无法从有限样本反推完整字段组合，需按业务日期重跑后才显示组合汇总。
 
-页面“每日结果”展示连接名称和全量统计。仅一侧存在的样本直接按字段宽表展示，默认一页最多100条；字段不同按完整组合展示准确数量，默认展开差异最多的组合，在下方直接并列显示每个字段的两侧值。字段表头优先使用执行时 `FIELD_MEMO` 的中文快照，旧样本没有中文快照时显示技术字段名。样本过宽会标记截断，核对仍使用完整值；超过100条已保存样本时分页。当前部署仍按单服务实例运行；真实内网 Gauss 和 Spark 集群需要现场验收。
+页面“每日结果”展示连接名称和全量统计。仅一侧存在的样本直接按字段宽表展示，默认一页最多100条；字段不同按完整组合展示准确数量，抽样模式默认展开差异最多的组合，全量模式默认展开全部字段差异行，在下方直接并列显示每个字段的两侧值。字段表头优先使用执行时 `FIELD_MEMO` 的中文快照，旧样本没有中文快照时显示技术字段名。样本过宽会标记截断，核对仍使用完整值；超过100条已保存样本时分页。当前部署仍按单服务实例运行；真实内网 Gauss 和 Spark 集群需要现场验收。
 
 ## 每日结果报表导出恢复
 
@@ -295,3 +302,15 @@ openGauss 使用 org.opengauss.Driver 和 jdbc:opengauss:，构建时自动将�
 新版 Spark 按全量字段差异行累计各字段出现次数，涵盖被折叠的字段组合，样本过期后仍可导出。历史结果有完整组合统计时可以精确回退，存在折叠或缺少完整统计时返回 `FIELD_COUNTS_UNAVAILABLE`，须用新版 Spark 重跑对应日期后导出。
 
 已有库需要补齐 `TSS_BCOMP_FIELD_COUNT_NEW`，以及结果表的 `FIELD_COUNTS_VERSION`、`FIELD_COUNTS_SIZE`、`REVISER_NAME`、`REVISER_USERNAME`。GaussDB 使用 `sql/add_bcomp_field_counts_new.sql` 和 `sql/add_bcomp_result_reviser_new.sql`，GDB/MySQL 使用对应 `_gdb.sql`。升级前检查实际结构，执行缺失的迁移，同时部署 service、Spark JAR 和内嵌前端。新建库直接使用最新完整建表脚本。操作顺序见 [内网源码构建说明](docs/migration/intranet-build.md)。
+
+### 同表多配置与永久编号
+
+Axon NEW17 脚本保留 `BCOMP_NAME` 为固定配置标识（例如 `a`、`a_1`），追加真实表名、可读配置名称和查询条件。两条配置可以查询同一张真实表，各自保存 SQL、字段统计和每日最后一次成功结果；条件重叠的记录分别计算。
+
+**请通过管理台“导入 Axon 配置”或 `/api/configurations/import` 上传脚本。** 脚本中的 `bcomp_index` 只负责包内三表关联；BD 按固定标识永久映射为内部编号。直接向元数据库执行替换脚本会绕开这项映射，不能保证历史隔离。旧8/10/11/13/14列NEW文件继续可导入。
+
+升级前停止等待和运行任务，先按元数据库类型执行一次 `sql/add_bcomp_configuration_identity_new.sql`（PostgreSQL/Gauss）或 `sql/add_bcomp_configuration_identity_gdb.sql`（GDB/MySQL），再一起更新服务与Spark作业。GDB DDL会隐式提交，重试前应核对实际字段和表。空库使用更新后的 `create_bcomp_*`，不再重复执行增量SQL。
+
+永久注册表 `TSS_BCOMP_CONFIG_ID_NEW` 和分配器 `TSS_BCOMP_CONFIG_ALLOC_NEW` 不可随配置替换、运行数据清理或删除配置而清空。首次导入会核对当前配置、每日结果和批次名称快照，保留所有历史引用过的编号；同一编号出现多个固定标识或同一标识出现多个编号时返回 `CONFIGURATION_IDENTITY_AMBIGUOUS`，整批回滚，需要先核对旧数据的身份关系。固定配置标识不可在编辑页改名，可读名称可编辑。
+
+每日结果沿用 `configurationName`/`CONFIGURATION_NAME` 表示固定标识，追加 `sourceTableName`、`configurationDisplayName` 和 `configurationScope` 的执行开始快照。报表的旧“表”列仍为固定标识，原列位置保持；“表明细”和“表字段明细”尾部追加“真实表名、配置名称、查询条件”。超过Excel单格32767字符的条件带明确截断标记，数据库和API保留完整快照。

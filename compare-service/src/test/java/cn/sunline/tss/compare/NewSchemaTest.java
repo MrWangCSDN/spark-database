@@ -10,6 +10,29 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.*;
 
 class NewSchemaTest {
+    @Test void identityMigrationsPreserveLegacyNamesAndReserveStableIdsForBothDialects() throws Exception {
+        for(String dialect:new String[]{"new","gdb"}) {
+            var source=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";MODE="+(dialect.equals("new")?"PostgreSQL":"MySQL")+";DB_CLOSE_DELAY=-1","sa","");
+            var sql=new JdbcTemplate(source);
+            sql.execute("CREATE TABLE TSS_BCOMP_CONF_NEW(BCOMP_INDEX BIGINT PRIMARY KEY,BCOMP_NAME VARCHAR(100))");
+            sql.execute("CREATE TABLE TSS_BCOMP_RESULT_NEW(BCOMP_INDEX BIGINT PRIMARY KEY,CONFIGURATION_NAME VARCHAR(100))");
+            sql.update("INSERT INTO TSS_BCOMP_CONF_NEW VALUES(7,'a')");
+            sql.update("INSERT INTO TSS_BCOMP_RESULT_NEW VALUES(7,'saved_a')");
+            executeOnH2(source,"../sql/add_bcomp_configuration_identity_"+dialect+".sql");
+            assertThat(sql.queryForObject("SELECT SOURCE_TABLE_NAME FROM TSS_BCOMP_CONF_NEW",String.class)).isEqualTo("a");
+            assertThat(sql.queryForObject("SELECT CONFIGURATION_NAME FROM TSS_BCOMP_CONF_NEW",String.class)).isEqualTo("a");
+            assertThat(sql.queryForObject("SELECT CONFIGURATION_NAME FROM TSS_BCOMP_RESULT_NEW",String.class)).isEqualTo("saved_a");
+            assertThat(sql.queryForObject("SELECT CONFIGURATION_DISPLAY_NAME FROM TSS_BCOMP_RESULT_NEW",String.class)).isNull();
+            assertThat(sql.queryForObject("SELECT SOURCE_TABLE_NAME FROM TSS_BCOMP_RESULT_NEW",String.class)).isNull();
+            String scope="x".repeat(12000);
+            sql.update("UPDATE TSS_BCOMP_CONF_NEW SET SOURCE_TABLE_NAME=?,CONFIGURATION_NAME=?,CONFIGURATION_SCOPE=?","s".repeat(256),"n".repeat(200),scope);
+            assertThat(sql.queryForObject("SELECT CONFIGURATION_SCOPE FROM TSS_BCOMP_CONF_NEW",String.class)).isEqualTo(scope);
+            assertThat(sql.queryForObject("SELECT NEXT_INDEX FROM TSS_BCOMP_CONFIG_ALLOC_NEW WHERE ALLOCATION_ID=1",Long.class)).isEqualTo(1);
+            sql.update("INSERT INTO TSS_BCOMP_CONFIG_ID_NEW VALUES(7,'hash','a')");
+            assertThatThrownBy(()->sql.update("INSERT INTO TSS_BCOMP_CONFIG_ID_NEW VALUES(8,'hash','other')"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        }
+    }
     @Test void partitionLimitMigrationsPreserveRowsAndDefaultTo64() throws Exception {
         for(String dialect:new String[]{"new","gdb"}) {
             String mode=dialect.equals("new")?"PostgreSQL":"MySQL";

@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter;
 @Configuration
 @EnableScheduling
 public class ResultRetention {
+    private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(ResultRetention.class);
     private final DailyResultRepository repository;
     private final int days;
     public ResultRetention(DailyResultRepository repository,@Value("${compare.result.retention-days:30}") int days) {
@@ -17,6 +18,11 @@ public class ResultRetention {
     }
     @Scheduled(initialDelay=60000,fixedDelay=3600000)
     public void clean() {
+        try {
+            repository.removeFinishedStages();
+        } catch(RuntimeException error) {
+            log.warn("全量暂存清理延后，继续已发布明细保留期清理，异常类型={}",error.getClass().getSimpleName());
+        }
         String cutoff=LocalDateTime.now().minusDays(days).format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         // Bound each scheduled pass; remaining expired groups are handled next hour.
         for(int i=0;i<10 && repository.expire(cutoff)==100;i++) { }

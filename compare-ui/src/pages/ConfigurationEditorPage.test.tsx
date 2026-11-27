@@ -146,6 +146,28 @@ test('preserves the returned HASH partition limit when other fields change', asy
   await user.click(screen.getByRole('button', { name: '保存配置' }))
 
   await waitFor(() => expect(saved).toHaveLength(1))
-  expect(saved[0].basic.name).toBe('新的核对名称')
+  expect(saved[0].basic.name).toBe('客户余额核对')
+  expect(saved[0].basic.configurationName).toBe('新的核对名称')
   expect(saved[0].basic.maxPartitionNum).toBe(128)
+})
+
+test('edits the display name while keeping an imported configuration code fixed', async () => {
+  nameModeResponses()
+  let saved: ConfigurationDetail | undefined
+  const imported = { ...nameModeConfiguration, basic: { ...nameModeConfiguration.basic, name: 'a_1', sourceTableName: 'a', configurationName: '配置乙', configurationScope: 'b=2' } }
+  server.use(http.get('/api/configurations/8', () => HttpResponse.json(imported)),
+    http.put('/api/configurations/8', async ({ request }) => {
+      saved = await request.json() as ConfigurationDetail
+      return HttpResponse.json({ configuration: saved, saved: true, cacheRefreshed: true })
+    }))
+  const user = userEvent.setup()
+  renderPage(<ConfigurationEditorPage />, '/configurations/8')
+  await waitFor(() => expect(screen.getByLabelText('固定配置标识')).toHaveValue('a_1'))
+  expect(screen.getByLabelText('固定配置标识')).toBeDisabled()
+  expect(screen.getByLabelText('真实表名')).toHaveValue('a')
+  await user.clear(screen.getByLabelText('配置名称'))
+  await user.type(screen.getByLabelText('配置名称'), '新配置名称')
+  await user.click(screen.getByRole('button', { name: '保存配置' }))
+  await waitFor(() => expect(saved?.basic.name).toBe('a_1'))
+  expect(saved?.basic.configurationName).toBe('新配置名称')
 })

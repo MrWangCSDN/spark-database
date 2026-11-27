@@ -80,11 +80,11 @@ class ConfigurationApiTest {
         var mvc=mvc(()->{});
         mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(22,"before"),"128")))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
-        for(String body:new String[]{valid(22,"omitted"),withLimit(valid(22,"null"),"null")}) {
+        for(String body:new String[]{valid(22,"before"),withLimit(valid(22,"before"),"null")}) {
             mvc.perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(body))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
         }
-        mvc.perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(withLimit(valid(22,"reset"),"64")))
+        mvc.perform(put("/api/configurations/22").contentType(APPLICATION_JSON).content(withLimit(valid(22,"before"),"64")))
             .andExpect(status().isOk()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(64));
     }
 
@@ -94,7 +94,7 @@ class ConfigurationApiTest {
         for(int offset=0;offset<modes.length;offset++) {
             long index=226+offset;
             String mode=modes[offset];
-            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(index,"legacy")))
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(index,"legacy"+index)))
                 .andExpect(status().isCreated());
             jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_DATE_MODE=? WHERE BCOMP_INDEX=?",mode,index);
             // Save the detail response exactly as the editor does, changing only the cap.
@@ -154,7 +154,7 @@ class ConfigurationApiTest {
     @Test void waitingAndRunningTasksBlockPartitionLimitChanges() throws Exception {
         var mvc=mvc(()->{});
         for(int index:new int[]{22,23}) {
-            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(index,"active"),"128")))
+            mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(index,"active"+index),"128")))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
             jdbc.update("INSERT INTO TSS_BCOMP_TASK_NEW(BCOMP_INDEX,TASK_BUSI_DATE,TASK_BATCH,BCOMP_TIME_NODE,TASK_STATE) VALUES(?,'20261123','active','EOD',?)",index,index==22?"1":"2");
             mvc.perform(put("/api/configurations/"+index).contentType(APPLICATION_JSON).content(withLimit(valid(index,"changed"),"32")))
@@ -165,9 +165,9 @@ class ConfigurationApiTest {
 
     @Test void allLegacyAxonFormatsPreserveMatchingTableLimitsAndDefaultNewIds() throws Exception {
         var mvc=mvc(()->{});
-        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"original"),"128")))
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"HASH_TABLE"),"128")))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(128));
-        for(String script:new String[]{axonScript("legacy"),hashScript("16","'HASH'"),sampleScript("100"),reviserScript("NULL","NULL")}) {
+        for(String script:new String[]{axonScript("HASH_TABLE"),hashScript("16","'HASH'"),sampleScript("100"),reviserScript("NULL","NULL")}) {
             mvc.perform(multipart("/api/configurations/import").file(scriptFile(script))).andExpect(status().isOk());
             mvc.perform(get("/api/configurations/1")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(128));
         }
@@ -183,12 +183,12 @@ class ConfigurationApiTest {
             .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.maxPartitionNum").value(256));
         jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_TYPE='1' WHERE BCOMP_INDEX=1");
         mvc.perform(multipart("/api/configurations/import").file(scriptFile(axonScript("table")))).andExpect(status().isOk());
-        mvc.perform(get("/api/configurations/1")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(64));
+        mvc.perform(get("/api/configurations/2")).andExpect(status().isOk()).andExpect(jsonPath("$.basic.maxPartitionNum").value(64));
     }
 
     @Test void importsExplicitMaximumAndAllowsAnExcelReviserNameWithoutUsername() throws Exception {
         var mvc=mvc(()->{});
-        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"original"),"128")))
+        mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(withLimit(valid(1,"HASH_TABLE"),"128")))
             .andExpect(status().isCreated());
         for(int limit:new int[]{1,64,100,256}) {
             jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_MAX_PARTITION_NUM=128 WHERE BCOMP_INDEX=1");
@@ -198,6 +198,26 @@ class ConfigurationApiTest {
                 .andExpect(jsonPath("$.basic.maxPartitionNum").value(limit));
             assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("Excel负责人");
             assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isNull();
+        }
+    }
+
+    @Test void importsActualAxonFullDifferenceExportThroughBothMetadataDialects() throws Exception {
+        byte[] fixture;
+        try(var input=new ClassPathResource("axon-full-differences.sql").getInputStream()) { fixture=input.readAllBytes(); }
+        for(var type:cn.sunline.tss.compare.metadata.MetadataDbType.values()) {
+            boolean mysql=type==cn.sunline.tss.compare.metadata.MetadataDbType.GDB;
+            var db=new DriverManagerDataSource("jdbc:h2:mem:"+UUID.randomUUID()+";DB_CLOSE_DELAY=-1;MODE="+(mysql?"MySQL":"PostgreSQL"),"sa","");
+            String ddl=java.nio.file.Files.readString(java.nio.file.Path.of("../sql/create_bcomp_"+(mysql?"gdb":"new")+".sql"));
+            try(var c=db.getConnection()) { org.h2.tools.RunScript.execute(c,new java.io.StringReader(ddl.replace("START TRANSACTION;","BEGIN;"))); }
+            var sql=new JdbcTemplate(db);
+            sql.update("INSERT INTO TSS_BCOMP_DATABASE_CONFIG_NEW(DATABASE_ID,DATABASE_NAME) VALUES(1,'old'),(2,'new')");
+            var repo=new ConfigurationRepository(db,30,cn.sunline.tss.compare.metadata.MetadataSqlDialect.forType(type));
+            var service=new ConfigurationService(repo,()->{});
+            var imported=service.importScript(new MockMultipartFile("file","actual-axon.sql","application/sql",fixture));
+            assertThat(imported.configurationCount()).isEqualTo(1);
+            assertThat(imported.fieldCount()).isEqualTo(2);
+            assertThat(sql.queryForObject("SELECT BCOMP_SAMPLE_LIMIT FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",Integer.class)).isEqualTo(-1);
+            assertThat(sql.queryForObject("SELECT BCOMP_MAX_PARTITION_NUM FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",Integer.class)).isEqualTo(64);
         }
     }
 
@@ -250,7 +270,7 @@ class ConfigurationApiTest {
         var mvc=mvc(()->{});
         for(int id:new int[]{1,2}) {
             mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON)
-                    .content(withLimit(valid(id,"original"+id),id==1?"128":"32")))
+                    .content(withLimit(valid(id,id==1?"acct_master":"loan_detail"),id==1?"128":"32")))
                 .andExpect(status().isCreated());
         }
         byte[] script;
@@ -288,7 +308,7 @@ class ConfigurationApiTest {
         var mvc=mvc(()->{});
         for(int index:new int[]{1,2}) {
             mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON)
-                    .content(withLimit(valid(index,"old"+index),index==1?"128":"32")))
+                    .content(withLimit(valid(index,index==1?"explicit-existing":"legacy-existing"),index==1?"128":"32")))
                 .andExpect(status().isCreated());
         }
         String script="""
@@ -575,7 +595,7 @@ class ConfigurationApiTest {
             .andExpect(jsonPath("$.configurationCount").value(1));
         assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("张三 O'Brien");
         assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("c-zhangsan");
-        mvc(() -> {}).perform(put("/api/configurations/1").contentType(APPLICATION_JSON).content(valid(1,"修改配置")))
+        mvc(() -> {}).perform(put("/api/configurations/1").contentType(APPLICATION_JSON).content(valid(1,"HASH_TABLE")))
             .andExpect(status().isOk());
         assertThat(jdbc.queryForObject("SELECT REVISER_NAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("张三 O'Brien");
         assertThat(jdbc.queryForObject("SELECT REVISER_USERNAME FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=1",String.class)).isEqualTo("c-zhangsan");
@@ -586,7 +606,7 @@ class ConfigurationApiTest {
             reviserScript("NULL", "null"),
             reviserScript("'NULL'", "NULL"),
             reviserScript("NULL", "'c-zhangsan'"),
-            axonScript("LEGACY"), hashScript("16", "'HASH'"), sampleScript("100")
+            axonScript("HASH_TABLE"), hashScript("16", "'HASH'"), sampleScript("100")
         };
         String[] names = {null, "NULL", null, null, null, null};
         String[] usernames = {null, null, "c-zhangsan", null, null, null};
@@ -633,12 +653,12 @@ class ConfigurationApiTest {
     }
 
     @Test void importsSampleLimitsAndKeepsLegacyFallbackNullable() throws Exception {
-        for (int limit : new int[]{0,37,1000,10000}) {
+        for (int limit : new int[]{-1,0,37,1000,10000}) {
             mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(sampleScript(""+limit))))
                 .andExpect(status().isOk());
             assertThat(jdbc.queryForObject("select BCOMP_SAMPLE_LIMIT from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",Integer.class)).isEqualTo(limit);
         }
-        for (String legacy : new String[]{axonScript("OLD"),hashScript("16","'HASH'")}) {
+        for (String legacy : new String[]{axonScript("HASH_TABLE"),hashScript("16","'HASH'")}) {
             mvc(() -> {}).perform(multipart("/api/configurations/import").file(scriptFile(legacy))).andExpect(status().isOk());
             assertThat(jdbc.queryForObject("select BCOMP_SAMPLE_LIMIT from TSS_BCOMP_CONF_NEW where BCOMP_INDEX=1",Integer.class)).isNull();
         }
@@ -648,7 +668,7 @@ class ConfigurationApiTest {
         mvc(() -> {}).perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"保留配置")))
             .andExpect(status().isCreated());
         AtomicInteger reloads=new AtomicInteger();
-        for (String limit : new String[]{"-1","10001","1.5","NULL","'1000'","1e3","999999999999999999999"}) {
+        for (String limit : new String[]{"-2","10001","1.5","NULL","'1000'","1e3","999999999999999999999"}) {
             mvc(reloads::incrementAndGet).perform(multipart("/api/configurations/import").file(scriptFile(sampleScript(limit))))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONFIG_SCRIPT"));
         }
@@ -866,8 +886,10 @@ class ConfigurationApiTest {
     @Test void copiesConfigurationWithoutTasksAndReturnsOptions() throws Exception {
         var mvc=mvc(() -> {});
         mvc.perform(post("/api/configurations").contentType(APPLICATION_JSON).content(valid(22,"source"))).andExpect(status().isCreated());
+        jdbc.update("UPDATE TSS_BCOMP_CONF_NEW SET BCOMP_SAMPLE_LIMIT=-1 WHERE BCOMP_INDEX=22");
         mvc.perform(post("/api/configurations/22/copy").contentType(APPLICATION_JSON).content("{\"newIndex\":23,\"newName\":\"副本\"}"))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.configuration.basic.bcompIndex").value(23));
+        assertThat(jdbc.queryForObject("SELECT BCOMP_SAMPLE_LIMIT FROM TSS_BCOMP_CONF_NEW WHERE BCOMP_INDEX=23",Integer.class)).isEqualTo(-1);
         assertThat(jdbc.queryForObject("select count(*) from TSS_BCOMP_TASK_NEW where BCOMP_INDEX=23",Integer.class)).isZero();
         mvc.perform(get("/api/configuration-options")).andExpect(status().isOk())
             .andExpect(jsonPath("$.states[0]").value("1"));

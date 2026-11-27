@@ -20,7 +20,8 @@ export function DailySampleGrid({ samples, type, originName, destinationName, pa
   samples: DailySamples; type: string; originName: string; destinationName: string; patternFields?: string[]
 }) {
   const columns = columnsFor(samples, patternFields)
-  return <div className="table-wrap daily-sample-grid" role="region" aria-label="差异样本宽表" tabIndex={0}>
+  const fullFieldDifferences = samples.summary.detailLimit === -1 && type === '4'
+  return <div className="table-wrap daily-sample-grid" role="region" aria-label={samples.summary.detailLimit === -1 ? '差异明细宽表' : '差异样本宽表'} tabIndex={0}>
     {type === '4' && <div className="sample-compare-legend"><span>{originName} → {destinationName}</span><small>底色标记不同字段</small></div>}
     <table><thead><tr><th>核对主键</th>{columns.map(column => <th key={column.name} title={column.name}>
       <span>{column.label}</span>{column.label !== column.name && <small>{column.name}</small>}
@@ -30,7 +31,9 @@ export function DailySampleGrid({ samples, type, originName, destinationName, pa
         {row.detail.truncated && <small className="sample-truncated">展示已截断</small>}
       </td>{columns.map(column => {
         const field = fields.get(column.name)
-        return <td key={column.name} className={`break-value${type === '4' && field ? ' sample-diff-cell' : ''}`}>{!field ? '未保存' : type === '4'
+        const missing = fullFieldDifferences && row.detail.truncated ? '未展示（已截断）'
+          : fullFieldDifferences && !patternFields ? '无差异' : '未保存'
+        return <td key={column.name} className={`break-value${type === '4' && field ? ' sample-diff-cell' : ''}`}>{!field ? missing : type === '4'
           ? <div className="sample-value-pair"><span className="sample-origin-value"><span className="sr-only">{originName} </span>{displayValue(field.originValue)}</span><span className="sample-compare-arrow" aria-hidden="true">→</span><span className="sample-destination-value"><span className="sr-only">{destinationName} </span>{displayValue(field.destinationValue)}</span></div>
           : displayValue(type === '3' ? field.originValue : field.destinationValue)}</td>
       })}</tr>

@@ -209,22 +209,37 @@ public class SparkHandlerTable {
                 //采用cogroup进行join
                 JavaPairRDD<String, Tuple2<Iterable<CountedRow>, Iterable<CountedRow>>> rsCogroup = pairsOra.cogroup(pairsYjj);
 
-                ResultAggregate result=runTwoPass(rsCogroup,limit,tuple -> {
-                        Class.forName(args[tssDataSourceDriver]);
-                        try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-                            return countPatternsPartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv));
+                if (limit == -1) {
+                    String run=UUID.randomUUID().toString();
+                    var writers=rsCogroup.coalesce(Math.min(4,rsCogroup.getNumPartitions()),false);
+                    try {
+                        var manifests=stageFull(writers,args,run,bcField,ignoreIdCsv,enumIndexCsv);
+                        phase="PUBLISH";
+                        log.info("库表核对阶段 applicationId={}, phase={}",applicationId,phase);
+                        try(Connection publication=metadataConnection(args)) {
+                            DailyResultPublisher.publishFull(publication,args,resultContext,run,manifests,writers.getNumPartitions());
                         }
-                    },(tuple,selection) -> {
-                        Class.forName(args[tssDataSourceDriver]);
-                        try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-                            return comparePartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv),
-                                limit,selection.retainedIds(),selection.patternSampleLimit());
-                        }
-                    });
-                phase="PUBLISH";
-                log.info("库表核对阶段 applicationId={}, phase={}",applicationId,phase);
-                try(Connection publication=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
-                    DailyResultPublisher.publish(publication,args,resultContext,result);
+                    } finally {
+                        removeStage(args,run);
+                    }
+                } else {
+                    ResultAggregate result=runTwoPass(rsCogroup,limit,tuple -> {
+                            Class.forName(args[tssDataSourceDriver]);
+                            try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                                return countPatternsPartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv));
+                            }
+                        },(tuple,selection) -> {
+                            Class.forName(args[tssDataSourceDriver]);
+                            try(Connection connection=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                                return comparePartition(tuple,bcField.value(),loadIgnoreMap(connection,ignoreIdCsv),loadEnumMap(connection,enumIndexCsv),
+                                    limit,selection.retainedIds(),selection.patternSampleLimit());
+                            }
+                        });
+                    phase="PUBLISH";
+                    log.info("库表核对阶段 applicationId={}, phase={}",applicationId,phase);
+                    try(Connection publication=DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword])) {
+                        DailyResultPublisher.publish(publication,args,resultContext,result);
+                    }
                 }
                 phase="COMPLETE";
                 log.info("库表核对阶段 applicationId={}, phase={}",applicationId,phase);
@@ -238,6 +253,61 @@ public class SparkHandlerTable {
             log.error("库表核对失败 applicationId={}, phase={}, diagnostic={}",applicationId,phase,SparkFailureDiagnostics.summary(error));
             throw error;
         }
+    }
+
+    private static Connection metadataConnection(String[] args) throws SQLException {
+        return DriverManager.getConnection(args[tssDataSourceUrl],args[tssDataSourceUser],args[tssDataSourcePassword]);
+    }
+
+    private static List<FullDifferenceStage.PartitionManifest> stageFull(
+            JavaPairRDD<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>> writers,String[] args,
+            String run,Broadcast<List<Row>> fields,String ignoreIds,String enumIds) throws Exception {
+        try(Connection connection=metadataConnection(args)) {
+            FullDifferenceStage.start(connection,run,args);
+        }
+        return writers.mapPartitionsWithIndex((partition,values)->{
+            Class.forName(args[tssDataSourceDriver]);
+            try(Connection connection=metadataConnection(args)) {
+                var ignore=loadIgnoreMap(connection,ignoreIds);
+                var enums=loadEnumMap(connection,enumIds);
+                long attempt=org.apache.spark.TaskContext.get().taskAttemptId();
+                var manifest=stagePartition(connection,run,partition,attempt,values,fields.value(),ignore,enums);
+                return Collections.singletonList(manifest).iterator();
+            }
+        },false).collect();
+    }
+
+    private static void removeStage(String[] args,String run) {
+        // Terminal-task maintenance also reclaims stages left by an interrupted driver.
+        try(Connection connection=metadataConnection(args)) {
+            FullDifferenceStage.remove(connection,run);
+        } catch(SQLException cleanup) {
+            log.warn("全量明细暂存清理延后 run={}, diagnostic={}",run,SparkFailureDiagnostics.summary(cleanup));
+        }
+    }
+
+    static FullDifferenceStage.PartitionManifest stagePartition(Connection connection,String run,int part,long attempt,
+            Iterator<Tuple2<String,Tuple2<Iterable<CountedRow>,Iterable<CountedRow>>>> groups,List<Row> fields,
+            Map<Integer,Set<String>> ignore,HashMap<Integer,HashMap<String,String>> enums) throws Exception {
+        List<String> names=fields.stream().map(field->(String)field.getAs("FIELD_NAME")).toList();
+        List<String> labels=fields.stream().map(field->(String)field.getAs("FIELD_MEMO")).toList();
+        var manifest=new FullDifferenceStage.PartitionManifest(part,attempt);
+        try(var writer=new FullDifferenceStage.Writer(connection,run,part,attempt)) {
+            while(groups.hasNext()) {
+                var compared=compareGroup(groups.next(),fields,ignore,enums);
+                manifest.totals.matched=Math.addExact(manifest.totals.matched,compared.matched);
+                if(compared.type==null) continue;
+                manifest.totals.countDifference(compared.type,compared.differingFields,compared.differences);
+                CountedRow displayed=compared.origin==null?compared.destination:compared.origin;
+                SampleRow row=SampleRow.of(displayed.businessKey,compared.type,names,labels,
+                    compared.origin==null?null:compared.origin.values,
+                    compared.destination==null?null:compared.destination.values,compared.differingFields);
+                FieldPattern pattern="4".equals(compared.type)?new FieldPattern(compared.differingFields):null;
+                writer.append(row,pattern,compared.differences);
+            }
+            writer.flush();
+        }
+        return manifest;
     }
 
     private static void recordTaskFailure(String[] args,Throwable error) {
@@ -609,7 +679,7 @@ public class SparkHandlerTable {
                 Object value=rs.getObject(1);
                 try {
                     int limit=new java.math.BigDecimal(value==null?globalLimit:value.toString()).intValueExact();
-                    if(limit<0 || limit>10000) throw new IllegalArgumentException("差异明细上限必须在0..10000之间");
+                    if(limit<(value==null?0:-1) || limit>10000) throw new IllegalArgumentException("样本上限须为0..10000，表级配置可用-1保存全量差异");
                     return limit;
                 } catch (NumberFormatException | ArithmeticException error) {
                     throw new IllegalArgumentException("差异明细上限必须为0..10000整数",error);
